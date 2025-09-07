@@ -1,0 +1,4 @@
+text,option1,option2,option3,option4,correct_option,difficulty,category_name,subject_name,level_name,explanation
+"What is the capital of France?","London","Berlin","Paris","Madrid",3,"Easy","Geography","World Capitals","Basic","Paris is the capital and largest city of France."
+"Which planet is known as the Red Planet?","Venus","Mars","Jupiter","Saturn",2,"Easy","Science","Astronomy","Basic","Mars appears red due to iron oxide on its surface."
+"What is 2 + 2?","3","4","5","6",2,"Easy","Mathematics","Arithmetic","Basic","Basic addition: 2 + 2 equals 4."

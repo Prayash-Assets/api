@@ -1,0 +1,84 @@
+{
+  "info": {
+    "name": "MockTest API",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json",
+    "_postman_id": "mocktest-api-collection"
+  },
+  "item": [
+    {
+      "name": "Create MockTest",
+      "request": {
+        "method": "POST",
+        "header": [{ "key": "Content-Type", "value": "application/json" }],
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"title\": \"Sample Test\",\n  \"description\": \"A test description\",\n  \"questions\": [\"60d21b4667d0d8992e610c85\"],\n  \"duration\": 60,\n  \"totalMarks\": 100,\n  \"passingMarks\": 40,\n  \"status\": \"ACTIVE\",\n  \"numberOfAttempts\": 2,\n  \"marksPerQuestion\": 2,\n  \"negativeMarking\": 0\n}"
+        },
+        "url": {
+          "raw": "http://localhost:3000/api/mocktests",
+          "protocol": "http",
+          "host": ["localhost"],
+          "port": "3000",
+          "path": ["api", "mocktests"]
+        }
+      }
+    },
+    {
+      "name": "Get All MockTests",
+      "request": {
+        "method": "GET",
+        "url": {
+          "raw": "http://localhost:3000/api/mocktests",
+          "protocol": "http",
+          "host": ["localhost"],
+          "port": "3000",
+          "path": ["api", "mocktests"]
+        }
+      }
+    },
+    {
+      "name": "Get MockTest By ID",
+      "request": {
+        "method": "GET",
+        "url": {
+          "raw": "http://localhost:3000/api/mocktests/:id",
+          "protocol": "http",
+          "host": ["localhost"],
+          "port": "3000",
+          "path": ["api", "mocktests", ":id"]
+        }
+      }
+    },
+    {
+      "name": "Update MockTest",
+      "request": {
+        "method": "PUT",
+        "header": [{ "key": "Content-Type", "value": "application/json" }],
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"description\": \"Updated description\",\n  \"status\": \"INACTIVE\"\n}"
+        },
+        "url": {
+          "raw": "http://localhost:3000/api/mocktests/:id",
+          "protocol": "http",
+          "host": ["localhost"],
+          "port": "3000",
+          "path": ["api", "mocktests", ":id"]
+        }
+      }
+    },
+    {
+      "name": "Delete MockTest",
+      "request": {
+        "method": "DELETE",
+        "url": {
+          "raw": "http://localhost:3000/api/mocktests/:id",
+          "protocol": "http",
+          "host": ["localhost"],
+          "port": "3000",
+          "path": ["api", "mocktests", ":id"]
+        }
+      }
+    }
+  ]
+}
