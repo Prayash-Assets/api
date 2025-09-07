@@ -51,6 +51,15 @@ export const createApp = async (): Promise<FastifyInstance> => {
     optionsSuccessStatus: 200
   });
 
+  // Handle AWS API Gateway stage prefix
+  app.addHook("onRequest", async (request, reply) => {
+    if (request.url.startsWith('/prod/')) {
+      request.raw.url = request.url.substring(5);
+    } else if (request.url === '/prod') {
+      request.raw.url = '/';
+    }
+  });
+
   // Connect to Database (ensure connection is established)
   await connectDB();
 
