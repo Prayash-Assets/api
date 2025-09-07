@@ -53,15 +53,27 @@ export const createApp = async (): Promise<FastifyInstance> => {
 
   // Handle AWS API Gateway stage prefix
   app.addHook("onRequest", async (request, reply) => {
+    const originalUrl = request.url;
     if (request.url.startsWith('/prod/')) {
       request.raw.url = request.url.substring(5);
     } else if (request.url === '/prod') {
       request.raw.url = '/';
     }
+    console.log(`URL: ${originalUrl} -> ${request.raw.url}`);
   });
 
   // Connect to Database (ensure connection is established)
   await connectDB();
+
+  // Root endpoint - register first
+  app.get("/", async (request, reply) => {
+    return { message: "Prayash API is running!" };
+  });
+
+  // Health check endpoint
+  app.get("/health", async (request, reply) => {
+    return { status: "ok", timestamp: new Date().toISOString() };
+  });
 
   // Register routes
   await app.register(userRoutes, { prefix: "/api" });
@@ -79,16 +91,6 @@ export const createApp = async (): Promise<FastifyInstance> => {
   await app.register(studentRoutes, { prefix: "/api/students" });
   await app.register(mediaRoutes, { prefix: "/api/media" });
   await app.register(dashboardRoutes, { prefix: "/api/dashboard" });
-
-  // Health check endpoint
-  app.get("/health", async (request, reply) => {
-    return { status: "ok", timestamp: new Date().toISOString() };
-  });
-
-  // Root endpoint
-  app.get("/", async (request, reply) => {
-    return { message: "Prayash API is running!" };
-  });
 
   return app;
 };
