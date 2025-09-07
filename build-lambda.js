@@ -3,7 +3,7 @@ const esbuild = require('esbuild');
 esbuild.build({
   entryPoints: ['src/lambda.ts'],
   bundle: true,
-  outfile: 'dist/lambda.js',
+  outfile: 'dist/index.js',
   platform: 'node',
   target: 'node18',
   format: 'cjs',
