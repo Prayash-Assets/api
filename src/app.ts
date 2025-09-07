@@ -74,12 +74,15 @@ export const createApp = async (): Promise<FastifyInstance> => {
   // Global request processing: strip stage prefix and log requests
   app.addHook("onRequest", async (request, reply) => {
     // Strip stage prefix from URL (dev, prod, etc.)
-    if (request.url.startsWith('/dev') || request.url.startsWith('/prod')) {
-      const newUrl = request.url.substring(request.url.indexOf('/', 1)) || '/';
-      request.raw.url = newUrl;
+    if (request.url.startsWith('/dev/')) {
+      request.raw.url = request.url.substring(4);
+    } else if (request.url.startsWith('/prod/')) {
+      request.raw.url = request.url.substring(5);
+    } else if (request.url === '/dev' || request.url === '/prod') {
+      request.raw.url = '/';
     }
     
-    console.log(`[GLOBAL REQUEST LOG] ${request.method} ${request.url}`);
+    console.log(`[GLOBAL REQUEST LOG] ${request.method} ${request.url} -> ${request.raw.url}`);
   });
 
   // Health check endpoint
