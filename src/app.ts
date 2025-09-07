@@ -71,8 +71,14 @@ export const createApp = async (): Promise<FastifyInstance> => {
   await app.register(mediaRoutes, { prefix: "/api/media" });
   await app.register(dashboardRoutes, { prefix: "/api/dashboard" });
 
-  // Global request logger for debugging authentication/session issues
+  // Global request processing: strip stage prefix and log requests
   app.addHook("onRequest", async (request, reply) => {
+    // Strip stage prefix from URL (dev, prod, etc.)
+    if (request.url.startsWith('/dev') || request.url.startsWith('/prod')) {
+      const newUrl = request.url.substring(request.url.indexOf('/', 1)) || '/';
+      request.raw.url = newUrl;
+    }
+    
     console.log(`[GLOBAL REQUEST LOG] ${request.method} ${request.url}`);
   });
 
