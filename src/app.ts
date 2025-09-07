@@ -51,20 +51,6 @@ export const createApp = async (): Promise<FastifyInstance> => {
     optionsSuccessStatus: 200
   });
 
-  // Global request processing: strip stage prefix and log requests
-  app.addHook("onRequest", async (request, reply) => {
-    // Strip stage prefix from URL (dev, prod, etc.)
-    if (request.url.startsWith('/dev/')) {
-      request.raw.url = request.url.substring(4);
-    } else if (request.url.startsWith('/prod/')) {
-      request.raw.url = request.url.substring(5);
-    } else if (request.url === '/dev' || request.url === '/prod') {
-      request.raw.url = '/';
-    }
-    
-    console.log(`[GLOBAL REQUEST LOG] ${request.method} ${request.url} -> ${request.raw.url}`);
-  });
-
   // Connect to Database (ensure connection is established)
   await connectDB();
 
