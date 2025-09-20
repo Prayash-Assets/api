@@ -26,7 +26,7 @@ export const getPaymentSettings = async (
 ) => {
   try {
     const settings = await PaymentSettings.findOne({ isActive: true })
-      .select("-__v -createdAt -updatedAt -secretKey -testSecretKey")
+      .select("gateway isLive publicKey testPublicKey isActive")
       .lean();
 
     if (!settings) {

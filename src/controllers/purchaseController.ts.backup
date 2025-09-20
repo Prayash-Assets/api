@@ -1,7 +1,7 @@
 import { FastifyRequest, FastifyReply } from "fastify";
 import Purchase, { IPurchase } from "../models/Purchase";
 import Package from "../models/Package";
-import User from "../models/User";
+import User, { Student } from "../models/User";
 import Razorpay from "razorpay";
 import { validatePaymentVerification } from "razorpay/dist/utils/razorpay-utils";
 import PDFDocument from "pdfkit";
@@ -35,13 +35,6 @@ export const createOrder = async (
   try {
     const { packageId } = req.body;
     const userId = (req as any).user.id;
-
-    if (!process.env.RAZORPAY_KEY_ID || !process.env.RAZORPAY_KEY_SECRET) {
-      return reply.status(500).send({ 
-        message: "Payment gateway not configured. Please contact support.",
-        error: "PAYMENT_GATEWAY_NOT_CONFIGURED"
-      });
-    }
 
     // Validate package exists and is available for purchase
     const pkg = await Package.findById(packageId);
@@ -150,7 +143,7 @@ export const createOrder = async (
       cancelledPreviousOrders: existingPendingOrders.length,
     });
 
-    const responseData = {
+    reply.status(201).send({
       orderId: order.id,
       currency: order.currency,
       amount: order.amount,
@@ -167,15 +160,7 @@ export const createOrder = async (
         phone: user.phone,
       },
       previousOrdersCancelled: existingPendingOrders.length,
-    };
-
-    console.log("🔍 Sending response to frontend:", {
-      orderId: responseData.orderId,
-      key: responseData.key,
-      keyPresent: !!responseData.key
     });
-
-    reply.status(201).send(responseData);
   } catch (error) {
     console.error("Error creating Razorpay order:", error);
     reply.status(500).send({ message: "Failed to create order", error });
@@ -194,35 +179,23 @@ export const verifyPayment = async (
       purchaseId,
     } = req.body;
 
-    // Get userId from purchase record instead of auth middleware
-    let purchase = await Purchase.findById(purchaseId);
-    
-    // Fallback: try to find by razorpay_order_id if purchaseId lookup fails
-    if (!purchase) {
-      purchase = await Purchase.findOne({ razorpayOrderId: razorpay_order_id });
-    }
-    
+    const userId = (req as any).user.id;
+
+    // Find purchase record
+    const purchase = await Purchase.findById(purchaseId).populate("package");
     if (!purchase) {
       return reply.status(404).send({ message: "Purchase record not found" });
     }
-    
-    const userId = (purchase.user as any).toString();
 
-    if (!process.env.RAZORPAY_KEY_SECRET) {
-      return reply.status(500).send({ 
-        message: "Payment gateway not configured. Please contact support.",
-        error: "PAYMENT_GATEWAY_NOT_CONFIGURED"
-      });
-    }
-
-    // Re-fetch purchase with populated package (use the found purchase)
-    const purchaseWithPackage = await Purchase.findById(purchase._id).populate("package");
-    if (!purchaseWithPackage) {
-      return reply.status(404).send({ message: "Purchase record not found" });
+    // Verify the purchase belongs to the current user
+    if ((purchase.user as any).toString() !== userId) {
+      return reply
+        .status(403)
+        .send({ message: "Unauthorized purchase verification" });
     }
 
     // Verify order ID matches
-    if (purchaseWithPackage.razorpayOrderId !== razorpay_order_id) {
+    if (purchase.razorpayOrderId !== razorpay_order_id) {
       return reply.status(400).send({ message: "Order ID mismatch" });
     }
 
@@ -237,95 +210,37 @@ export const verifyPayment = async (
     );
 
     if (isValidSignature) {
+      // Payment is valid, update purchase record
+      purchase.razorpayPaymentId = razorpay_payment_id;
+      purchase.razorpaySignature = razorpay_signature;
+      purchase.status = "captured";
+      await purchase.save();
+
+      // Add package to student's purchased packages
+      await addPackageToStudent(userId, (purchase.package as any)._id);
+
+      // Fetch payment details from Razorpay for additional verification
       try {
-        // Step 1: Fetch payment details to check current status
         const payment = await razorpay.payments.fetch(razorpay_payment_id);
-        console.log("Payment details fetched:", {
+        console.log("Payment verified:", {
           paymentId: payment.id,
           status: payment.status,
           amount: payment.amount,
-          captured: payment.captured
         });
-
-        // Step 2: Handle payment capture (auto-capture may not work with orders)
-        let captureResult = null;
-        if (payment.status === 'authorized' && !payment.captured) {
-          console.log("Payment authorized but not captured. Capturing now...");
-          
-          captureResult = await razorpay.payments.capture(
-            razorpay_payment_id,
-            payment.amount,
-            'INR'
-          );
-          
-          console.log("Manual capture result:", captureResult);
-        } else if (payment.status === 'captured') {
-          console.log("Payment already captured by auto-capture");
-        }
-
-        // Step 3: Update purchase record based on final payment status
-        purchaseWithPackage.razorpayPaymentId = razorpay_payment_id;
-        purchaseWithPackage.razorpaySignature = razorpay_signature;
-        
-        // Set status based on actual payment state
-        const isCaptured = payment.captured || payment.status === 'captured' || 
-                          (captureResult && captureResult.captured);
-        
-        if (isCaptured) {
-          purchaseWithPackage.status = "captured";
-          console.log("✅ Payment captured successfully");
-          
-          // Add package to student only after successful capture
-          console.log("📚 About to add package to student:", {
-            userId,
-            packageId: (purchaseWithPackage.package as any)._id,
-            userType: "will check in function"
-          });
-          
-          try {
-            await addPackageToStudent(userId, (purchaseWithPackage.package as any)._id);
-            console.log("✅ Package assignment completed successfully");
-          } catch (packageError) {
-            console.error("❌ Package assignment failed:", packageError);
-          }
-        } else if (payment.status === 'authorized') {
-          purchaseWithPackage.status = "authorized";
-          console.log("⚠️ Payment authorized but not captured");
-        } else {
-          purchaseWithPackage.status = "failed";
-          console.log("❌ Payment in unexpected status:", payment.status);
-        }
-        
-        await purchaseWithPackage.save();
-
-        reply.status(200).send({
-          message: purchaseWithPackage.status === "captured" ? "Payment captured successfully" : "Payment authorized but not captured",
-          purchase: purchaseWithPackage,
-          packageAccess: purchaseWithPackage.status === "captured" ? "granted" : "pending",
-          paymentStatus: payment.status,
-          captured: payment.captured || payment.status === 'captured' || (captureResult && captureResult.captured)
-        });
-
-      } catch (paymentError: any) {
-        console.error("Error processing payment:", paymentError);
-        
-        // Update purchase as failed
-        purchaseWithPackage.razorpayPaymentId = razorpay_payment_id;
-        purchaseWithPackage.razorpaySignature = razorpay_signature;
-        purchaseWithPackage.status = "failed";
-        purchaseWithPackage.failureReason = paymentError.message || "Payment processing failed";
-        await purchaseWithPackage.save();
-
-        reply.status(400).send({ 
-          message: "Payment processing failed", 
-          error: paymentError.message,
-          purchase: purchaseWithPackage
-        });
+      } catch (paymentFetchError) {
+        console.error("Could not fetch payment details:", paymentFetchError);
+        // Don't fail the verification if payment fetch fails
       }
+
+      reply.status(200).send({
+        message: "Payment verified successfully",
+        purchase,
+        packageAccess: "granted",
+      });
     } else {
       // Invalid signature
-      purchaseWithPackage.status = "failed";
-      await purchaseWithPackage.save();
+      purchase.status = "failed";
+      await purchase.save();
       reply.status(400).send({ message: "Payment verification failed" });
     }
   } catch (error) {
@@ -337,64 +252,26 @@ export const verifyPayment = async (
 // Helper function to add package to student
 const addPackageToStudent = async (userId: string, packageId: string) => {
   try {
-    console.log(`🔍 Starting addPackageToStudent - userId: ${userId}, packageId: ${packageId}`);
-    
-    // First check if user exists and get their type
-    const user = await User.findById(userId);
-    if (!user) {
-      console.error(`❌ User not found: ${userId}`);
-      throw new Error("User not found");
+    const student = await Student.findById(userId);
+    if (!student) {
+      throw new Error("Student not found");
     }
 
-    console.log(`✅ User found: ${user.email}, type: ${user.userType}, current packages: ${(user as any).packages?.length || 0}`);
-
-    // Only students can have packages
-    if (user.userType !== 'Student') {
-      console.log(`⚠️ User ${user.email} is not a student (type: ${user.userType}), cannot add packages`);
-      return;
-    }
-
-    console.log(`📝 Attempting to add package ${packageId} to student ${userId}`);
-    
-    // Use MongoDB update operation to add package (handles duplicates automatically)
-    const updateResult = await User.updateOne(
-      { _id: userId, userType: 'Student' },
-      { $addToSet: { packages: packageId } }
+    // Check if package is already in student's packages
+    const packageExists = student.packages?.some(
+      (pkg: any) => pkg.toString() === packageId.toString()
     );
-    
-    console.log(`📝 MongoDB update result:`, {
-      acknowledged: updateResult.acknowledged,
-      matchedCount: updateResult.matchedCount,
-      modifiedCount: updateResult.modifiedCount,
-      upsertedCount: updateResult.upsertedCount
-    });
-    
-    if (updateResult.matchedCount === 0) {
-      console.error(`❌ No student user found with ID ${userId}`);
-      throw new Error("Student user not found for package assignment");
+
+    if (!packageExists) {
+      if (!student.packages) {
+        student.packages = [];
+      }
+      student.packages.push(packageId as any);
+      await student.save();
+      console.log(`Package ${packageId} added to student ${userId}`);
     }
-    
-    if (updateResult.modifiedCount > 0) {
-      console.log(`✅ Package ${packageId} successfully added to student ${userId}`);
-    } else {
-      console.log(`ℹ️ Package ${packageId} already exists for student ${userId}`);
-    }
-    
-    // Verify the update
-    const verifyUser = await User.findById(userId);
-    const packageCount = (verifyUser as any)?.packages?.length || 0;
-    const hasPackage = (verifyUser as any)?.packages?.includes(packageId);
-    
-    console.log(`🔍 Final verification:`, {
-      userId,
-      packageId,
-      totalPackages: packageCount,
-      hasThisPackage: hasPackage,
-      userType: verifyUser?.userType
-    });
-    
   } catch (error) {
-    console.error("❌ Error in addPackageToStudent:", error);
+    console.error("Error adding package to student:", error);
     throw error;
   }
 };
@@ -877,80 +754,6 @@ export const generateReceipt = async (
         error: error instanceof Error ? error.message : "Unknown error",
       });
     }
-  }
-};
-
-// Manual capture endpoint for testing/admin use
-export const capturePayment = async (
-  req: FastifyRequest<{ Params: GetOrDeletePurchaseParams }>,
-  reply: FastifyReply
-) => {
-  try {
-    const purchaseId = req.params.id;
-    const userRoles = (req as any).userRoles || [];
-    const isAdmin = userRoles.includes("admin") || userRoles.includes("Admin");
-
-    if (!isAdmin) {
-      return reply.status(403).send({ message: "Admin access required" });
-    }
-
-    const purchase = await Purchase.findById(purchaseId).populate("package");
-    if (!purchase) {
-      return reply.status(404).send({ message: "Purchase not found" });
-    }
-
-    if (!purchase.razorpayPaymentId) {
-      return reply.status(400).send({ message: "No payment ID found" });
-    }
-
-    if (purchase.status === "captured") {
-      return reply.status(400).send({ message: "Payment already captured" });
-    }
-
-    // Fetch payment details
-    const payment = await razorpay.payments.fetch(purchase.razorpayPaymentId);
-    
-    if (payment.status !== 'authorized') {
-      return reply.status(400).send({ 
-        message: "Payment is not in authorized state", 
-        currentStatus: payment.status 
-      });
-    }
-
-    // Capture the payment
-    const captureResult = await razorpay.payments.capture(
-      purchase.razorpayPaymentId,
-      payment.amount,
-      'INR'
-    );
-
-    if (captureResult.captured) {
-      purchase.status = "captured";
-      await purchase.save();
-
-      // Add package to user
-      await addPackageToStudent(
-        (purchase.user as any).toString(),
-        (purchase.package as any)._id.toString()
-      );
-
-      reply.status(200).send({
-        message: "Payment captured successfully",
-        purchase,
-        captureResult
-      });
-    } else {
-      reply.status(400).send({
-        message: "Payment capture failed",
-        captureResult
-      });
-    }
-  } catch (error) {
-    console.error("Error capturing payment:", error);
-    reply.status(500).send({
-      message: "Failed to capture payment",
-      error: error instanceof Error ? error.message : "Unknown error"
-    });
   }
 };
 

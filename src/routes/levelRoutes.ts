@@ -26,15 +26,13 @@ export default async function levelRoutes(fastify: FastifyInstance) {
     deleteLevel as any
   );
 
-  // Read operations - accessible to authenticated users (students and admins)
+  // Read operations - public access
   fastify.get(
     "/",
-    { preHandler: [checkRoles(["student", "admin"])] },
     getAllLevels as any
   );
   fastify.get(
     "/:id",
-    { preHandler: [checkRoles(["student", "admin"])] },
     getLevelById as any
   );
 }

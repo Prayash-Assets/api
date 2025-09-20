@@ -26,15 +26,13 @@ export default async function categoryRoutes(fastify: FastifyInstance) {
     deleteCategory as any
   );
 
-  // Read operations - accessible to authenticated users (students and admins)
+  // Read operations - public access
   fastify.get(
     "/",
-    { preHandler: [checkRoles(["student", "admin"])] },
     getAllCategories as any
   );
   fastify.get(
     "/:id",
-    { preHandler: [checkRoles(["student", "admin"])] },
     getCategoryById as any
   );
 }

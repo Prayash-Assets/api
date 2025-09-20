@@ -1,5 +1,4 @@
 import { FastifyInstance, FastifyPluginOptions } from "fastify";
-import { checkRoles } from "../middleware/rbacMiddleware";
 import {
   getDashboardData,
   getPurchasedPackages,
@@ -22,73 +21,66 @@ async function studentRoutes(
   fastify: FastifyInstance,
   options: FastifyPluginOptions
 ) {
-  // All routes require student role
-  const studentOnly = [checkRoles(["student"])];
-
   // Profile routes
-  fastify.get("/profile", { preHandler: studentOnly }, getProfile);
-  fastify.put("/profile", { preHandler: studentOnly }, updateProfile);
+  fastify.get("/profile", getProfile);
+  fastify.put("/profile", updateProfile);
 
   // Dashboard data
-  fastify.get("/dashboard", { preHandler: studentOnly }, getDashboardData);
+  fastify.get("/dashboard", getDashboardData);
 
   // Packages
-  fastify.get("/packages", { preHandler: studentOnly }, getAvailablePackages);
-  fastify.get("/purchased-packages", { preHandler: studentOnly }, getPurchasedPackages);
-  fastify.post("/purchase", { preHandler: studentOnly }, purchasePackage);
+  fastify.get("/packages", getAvailablePackages);
+  fastify.get("/purchased-packages", getPurchasedPackages);
+  fastify.post("/purchase", purchasePackage);
 
   // Mock tests
-  fastify.get(
-    "/mock-tests",
-    { preHandler: studentOnly },
-    getAvailableMockTests
-  );
-  fastify.get("/mock-tests/:testId", { preHandler: studentOnly }, getMockTest);
-  fastify.get(
-    "/mock-tests/:testId/start",
-    { preHandler: studentOnly },
-    getMockTest
-  );
-  fastify.get(
-    "/mock-tests/:testId/attempts",
-    { preHandler: studentOnly },
-    getTestAttempts
-  );
-  fastify.get(
-    "/mock-tests/:testId/eligibility",
-    { preHandler: studentOnly },
-    checkTestAttemptEligibility
-  );
-  fastify.post(
-    "/mock-tests/:testId/submit",
-    { preHandler: studentOnly },
-    submitMockTest
-  );
+  fastify.get("/mock-tests", getAvailableMockTests);
+  fastify.get("/mock-tests/:id", getMockTest);
+  fastify.get("/mock-tests/:id/start", getMockTest);
+  fastify.get("/mock-tests/:id/attempts", getTestAttempts);
+  fastify.get("/mock-tests/:id/eligibility", checkTestAttemptEligibility);
+  fastify.post("/mock-tests/:id/submit", submitMockTest);
 
   // Test results
-  fastify.get("/results", { preHandler: studentOnly }, getStudentResults);
-  fastify.get(
-    "/results/:resultId/detailed",
-    { preHandler: studentOnly },
-    getDetailedTestResult
-  );
+  fastify.get("/results", getStudentResults);
+  fastify.get("/results/:id", getDetailedTestResult);
 
   // Debug endpoints (temporary)
-  fastify.get(
-    "/debug/packages",
-    { preHandler: studentOnly },
-    debugPackageMockTests
-  );
-  fastify.post(
-    "/debug/assign-tests",
-    { preHandler: studentOnly },
-    assignMockTestsToPackages
-  );
+  fastify.get("/debug/packages", debugPackageMockTests);
+  fastify.post("/debug/assign-tests", assignMockTestsToPackages);
+  
+  fastify.get("/debug/user-purchases", async (request, reply) => {
+    try {
+      const User = require("../models/User").default;
+      const Purchase = require("../models/Purchase").default;
+      
+      // Find user by email
+      const user = await User.findOne({ email: "daniel@inovitrix.com" });
+      console.log("DEBUG: Found user:", user ? { id: user._id, email: user.email } : "Not found");
+      
+      if (user) {
+        // Find all purchases for this user
+        const purchases = await Purchase.find({ user: user._id });
+        console.log("DEBUG: Found purchases for user:", purchases.length);
+        
+        reply.send({
+          user: { id: user._id, email: user.email },
+          purchases: purchases.map((p: any) => ({
+            id: p._id,
+            status: p.status,
+            package: p.package,
+            createdAt: p.createdAt
+          }))
+        });
+      } else {
+        reply.send({ error: "User not found" });
+      }
+    } catch (error: any) {
+      reply.status(500).send({ error: error.message });
+    }
+  });
 
-  fastify.get(
-    "/debug/simple",
-    { preHandler: studentOnly },
-    async (request, reply) => {
+  fastify.get("/debug/simple", async (request, reply) => {
       try {
         const userId = (request as any).user?.id;
         const Student = require("../models/User").Student;

@@ -16,6 +16,8 @@ import settingsRoutes from "./routes/settings.routes";
 import studentRoutes from "./routes/studentRoutes";
 import mediaRoutes from "./routes/mediaRoutes";
 import dashboardRoutes from "./routes/dashboardRoutes";
+import testRoutes from "./routes/testRoutes";
+import webhookRoutes from "./routes/webhookRoutes";
 
 import cors from "@fastify/cors";
 
@@ -91,6 +93,8 @@ export const createApp = async (): Promise<FastifyInstance> => {
   await app.register(studentRoutes, { prefix: "/api/students" });
   await app.register(mediaRoutes, { prefix: "/api/media" });
   await app.register(dashboardRoutes, { prefix: "/api/dashboard" });
+  await app.register(testRoutes, { prefix: "/api/test" });
+  await app.register(webhookRoutes, { prefix: "/api/webhooks" });
 
   return app;
 };

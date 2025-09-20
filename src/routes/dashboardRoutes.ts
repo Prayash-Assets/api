@@ -14,7 +14,7 @@ const checkAdmin = async (request: any, reply: any) => {
     const User = require("../models/User").default;
     const user = await User.findById(request.user.id);
     
-    if (!user || user.userType !== "Admin") {
+    if (!user || user.userType.toLowerCase() !== "admin") {
       return reply.status(403).send({ error: "Admin access required" });
     }
     
