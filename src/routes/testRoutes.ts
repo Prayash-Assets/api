@@ -1,10 +1,11 @@
 import { FastifyInstance } from "fastify";
 import { Student } from "../models/User";
 import Package from "../models/Package";
+import { checkRoles } from "../middleware/rbacMiddleware";
 
 export default async function testRoutes(fastify: FastifyInstance) {
-  // Test endpoint to assign package to user
-  fastify.post("/assign-package", async (request, reply) => {
+  // Test endpoint to assign package to user - admin only
+  fastify.post("/assign-package", { preHandler: [checkRoles(["admin"])] }, async (request, reply) => {
     try {
       const { userEmail, packageName } = request.body as { userEmail: string; packageName: string };
       
@@ -43,8 +44,8 @@ export default async function testRoutes(fastify: FastifyInstance) {
     }
   });
   
-  // Test endpoint to check user packages
-  fastify.get("/user-packages/:email", async (request, reply) => {
+  // Test endpoint to check user packages - admin only
+  fastify.get("/user-packages/:email", { preHandler: [checkRoles(["admin"])] }, async (request, reply) => {
     try {
       const { email } = request.params as { email: string };
       

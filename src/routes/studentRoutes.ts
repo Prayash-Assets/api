@@ -16,40 +16,41 @@ import {
   assignMockTestsToPackages,
 } from "../controllers/studentController";
 import { getAvailablePackages } from "../controllers/packageController";
+import { checkRoles } from "../middleware/rbacMiddleware";
 
 async function studentRoutes(
   fastify: FastifyInstance,
   options: FastifyPluginOptions
 ) {
   // Profile routes
-  fastify.get("/profile", getProfile);
-  fastify.put("/profile", updateProfile);
+  fastify.get("/profile", { preHandler: [checkRoles(["student"])] }, getProfile);
+  fastify.put("/profile", { preHandler: [checkRoles(["student"])] }, updateProfile);
 
   // Dashboard data
-  fastify.get("/dashboard", getDashboardData);
+  fastify.get("/dashboard", { preHandler: [checkRoles(["student"])] }, getDashboardData);
 
   // Packages
-  fastify.get("/packages", getAvailablePackages);
-  fastify.get("/purchased-packages", getPurchasedPackages);
-  fastify.post("/purchase", purchasePackage);
+  fastify.get("/packages", { preHandler: [checkRoles(["student"])] }, getAvailablePackages);
+  fastify.get("/purchased-packages", { preHandler: [checkRoles(["student"])] }, getPurchasedPackages);
+  fastify.post("/purchase", { preHandler: [checkRoles(["student"])] }, purchasePackage);
 
   // Mock tests
-  fastify.get("/mock-tests", getAvailableMockTests);
-  fastify.get("/mock-tests/:id", getMockTest);
-  fastify.get("/mock-tests/:id/start", getMockTest);
-  fastify.get("/mock-tests/:id/attempts", getTestAttempts);
-  fastify.get("/mock-tests/:id/eligibility", checkTestAttemptEligibility);
-  fastify.post("/mock-tests/:id/submit", submitMockTest);
+  fastify.get("/mock-tests", { preHandler: [checkRoles(["student"])] }, getAvailableMockTests);
+  fastify.get("/mock-tests/:id", { preHandler: [checkRoles(["student"])] }, getMockTest);
+  fastify.get("/mock-tests/:id/start", { preHandler: [checkRoles(["student"])] }, getMockTest);
+  fastify.get("/mock-tests/:id/attempts", { preHandler: [checkRoles(["student"])] }, getTestAttempts);
+  fastify.get("/mock-tests/:id/eligibility", { preHandler: [checkRoles(["student"])] }, checkTestAttemptEligibility);
+  fastify.post("/mock-tests/:id/submit", { preHandler: [checkRoles(["student"])] }, submitMockTest);
 
   // Test results
-  fastify.get("/results", getStudentResults);
-  fastify.get("/results/:id", getDetailedTestResult);
+  fastify.get("/results", { preHandler: [checkRoles(["student"])] }, getStudentResults);
+  fastify.get("/results/:id", { preHandler: [checkRoles(["student"])] }, getDetailedTestResult);
 
-  // Debug endpoints (temporary)
-  fastify.get("/debug/packages", debugPackageMockTests);
-  fastify.post("/debug/assign-tests", assignMockTestsToPackages);
+  // Debug endpoints (temporary) - admin only
+  fastify.get("/debug/packages", { preHandler: [checkRoles(["admin"])] }, debugPackageMockTests);
+  fastify.post("/debug/assign-tests", { preHandler: [checkRoles(["admin"])] }, assignMockTestsToPackages);
   
-  fastify.get("/debug/user-purchases", async (request, reply) => {
+  fastify.get("/debug/user-purchases", { preHandler: [checkRoles(["admin"])] }, async (request, reply) => {
     try {
       const User = require("../models/User").default;
       const Purchase = require("../models/Purchase").default;
@@ -80,7 +81,7 @@ async function studentRoutes(
     }
   });
 
-  fastify.get("/debug/simple", async (request, reply) => {
+  fastify.get("/debug/simple", { preHandler: [checkRoles(["admin"])] }, async (request, reply) => {
       try {
         const userId = (request as any).user?.id;
         const Student = require("../models/User").Student;

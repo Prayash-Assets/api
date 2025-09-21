@@ -26,13 +26,15 @@ export default async function subjectRoutes(fastify: FastifyInstance) {
     deleteSubject as any
   );
 
-  // Read operations - public access
+  // Read operations - authenticated access
   fastify.get(
     "/",
+    { preHandler: [checkRoles(["student", "admin"])] },
     getAllSubjects as any
   );
   fastify.get(
     "/:id",
+    { preHandler: [checkRoles(["student", "admin"])] },
     getSubjectById as any
   );
 }

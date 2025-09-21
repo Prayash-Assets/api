@@ -44,7 +44,8 @@ export const createApp = async (): Promise<FastifyInstance> => {
     origin: [
       'https://main.d29juw0qooqw8k.amplifyapp.com',
       'http://localhost:3000', // For local development
-      'https://api.prayashassets.com' // Allow API domain for preflight
+      'https://prayashassets.com', // Production frontend
+      'https://www.prayashassets.com' // Production frontend with www
     ],
     methods: ["GET", "PUT", "POST", "DELETE", "OPTIONS"],
     allowedHeaders: ["Content-Type", "Authorization", "Origin", "Accept", "X-Requested-With"],
