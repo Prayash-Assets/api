@@ -47,7 +47,7 @@ export const checkRoles = (allowedRoles: string[]) => {
         return reply.status(403).send({ error: "Insufficient permissions" });
       }
 
-      req.user = { id: user.id, email: user.email, roles: userRoles };
+      req.user = { id: user.id, email: user.email, roles: userRoles, userType: user.userType };
       
     } catch (error) {
       return reply.status(401).send({ error: "Invalid token" });

@@ -133,16 +133,25 @@ export const getAllQuestions = async (
   try {
     const page = parseInt((request.query as any)?.page || '1');
     const limit = parseInt((request.query as any)?.limit || '50');
+    const search = (request.query as any)?.search;
     const skip = (page - 1) * limit;
 
+    // Build search query
+    let searchQuery = {};
+    if (search) {
+      searchQuery = {
+        text: { $regex: search, $options: 'i' }
+      };
+    }
+
     const [questions, totalQuestions] = await Promise.all([
-      Question.find()
+      Question.find(searchQuery)
         .populate("category_id")
         .populate("subject_id")
         .populate("level_id")
         .skip(skip)
         .limit(limit),
-      Question.countDocuments()
+      Question.countDocuments(searchQuery)
     ]);
 
     const totalPages = Math.ceil(totalQuestions / limit);

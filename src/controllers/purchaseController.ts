@@ -405,8 +405,9 @@ export const getPurchaseById = async (
 ) => {
   try {
     const userId = (req as any).user.id;
-    const userRoles = (req as any).userRoles || [];
-    const isAdmin = userRoles.includes("admin") || userRoles.includes("Admin");
+    const userRoles = (req as any).user.roles || [];
+    const userType = (req as any).user.userType;
+    const isAdmin = userRoles.includes("admin") || userRoles.includes("Admin") || userType === "admin" || userType === "Admin";
 
     const purchase = await Purchase.findById(req.params.id)
       .populate("user", "fullname email phone")
@@ -433,29 +434,66 @@ export const getUserPurchases = async (
 ) => {
   try {
     const userId = (req as any).user.id;
-    const userRoles = (req as any).userRoles || [];
-    const isAdmin = userRoles.includes("admin") || userRoles.includes("Admin");
+    const userRoles = (req as any).user.roles || [];
+    const userType = (req as any).user.userType;
+    const isAdmin = userRoles.includes("admin") || userRoles.includes("Admin") || userType === "admin" || userType === "Admin";
 
-    let purchases;
+    const page = parseInt((req.query as any)?.page || '1');
+    const limit = parseInt((req.query as any)?.limit || '10');
+    const search = (req.query as any)?.search;
+    const status = (req.query as any)?.status;
+    const skip = (page - 1) * limit;
 
-    if (isAdmin) {
-      // Admin can see all purchases
-      purchases = await Purchase.find({})
-        .populate("user", "fullname email phone")
-        .populate("package", "name description price duration")
-        .sort({ createdAt: -1 });
-    } else {
-      // Regular users can see their own purchases including pending ones
-      purchases = await Purchase.find({
+    let baseQuery = {};
+    let searchQuery = {};
+
+    if (!isAdmin) {
+      baseQuery = {
         user: userId,
-        status: { $in: ["captured", "authorized", "created"] }, // Include pending orders
-      })
-        .populate("package", "name description price duration")
-        .sort({ createdAt: -1 });
+        status: { $in: ["captured", "authorized", "created"] }
+      };
     }
 
-    reply.status(200).send(purchases);
+    if (search) {
+      searchQuery = {
+        $or: [
+          { razorpayPaymentId: { $regex: search, $options: 'i' } },
+          { razorpayOrderId: { $regex: search, $options: 'i' } }
+        ]
+      };
+    }
+
+    if (status && status !== 'all') {
+      baseQuery = { ...baseQuery, status };
+    }
+
+    const finalQuery = { ...baseQuery, ...searchQuery };
+
+    const [purchases, totalPurchases] = await Promise.all([
+      Purchase.find(finalQuery)
+        .populate("user", "fullname email phone")
+        .populate("package", "name description price duration")
+        .sort({ createdAt: -1 })
+        .skip(skip)
+        .limit(limit),
+      Purchase.countDocuments(finalQuery)
+    ]);
+
+    const totalPages = Math.ceil(totalPurchases / limit);
+
+    reply.status(200).send({
+      purchases,
+      pagination: {
+        currentPage: page,
+        totalPages,
+        totalPurchases,
+        purchasesPerPage: limit,
+        hasNextPage: page < totalPages,
+        hasPrevPage: page > 1
+      }
+    });
   } catch (error) {
+    console.error('Error in getUserPurchases:', error);
     reply.status(500).send({ message: "Failed to retrieve purchases", error });
   }
 };
@@ -546,8 +584,9 @@ export const generateReceipt = async (
   try {
     const purchaseId = req.params.id;
     const userId = (req as any).user.id;
-    const userRoles = (req as any).userRoles || [];
-    const isAdmin = userRoles.includes("admin") || userRoles.includes("Admin");
+    const userRoles = (req as any).user.roles || [];
+    const userType = (req as any).user.userType;
+    const isAdmin = userRoles.includes("admin") || userRoles.includes("Admin") || userType === "admin" || userType === "Admin";
 
     console.log(`Generating receipt for purchase: ${purchaseId}`);
 
@@ -887,8 +926,9 @@ export const capturePayment = async (
 ) => {
   try {
     const purchaseId = req.params.id;
-    const userRoles = (req as any).userRoles || [];
-    const isAdmin = userRoles.includes("admin") || userRoles.includes("Admin");
+    const userRoles = (req as any).user.roles || [];
+    const userType = (req as any).user.userType;
+    const isAdmin = userRoles.includes("admin") || userRoles.includes("Admin") || userType === "admin" || userType === "Admin";
 
     if (!isAdmin) {
       return reply.status(403).send({ message: "Admin access required" });
@@ -962,8 +1002,9 @@ export const viewReceipt = async (
   try {
     const purchaseId = req.params.id;
     const userId = (req as any).user.id;
-    const userRoles = (req as any).userRoles || [];
-    const isAdmin = userRoles.includes("admin") || userRoles.includes("Admin");
+    const userRoles = (req as any).user.roles || [];
+    const userType = (req as any).user.userType;
+    const isAdmin = userRoles.includes("admin") || userRoles.includes("Admin") || userType === "admin" || userType === "Admin";
 
     console.log(`Viewing receipt for purchase: ${purchaseId}`);
 
