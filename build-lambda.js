@@ -7,7 +7,7 @@ esbuild.build({
   platform: 'node',
   target: 'node18',
   format: 'cjs',
-  external: ['aws-sdk'],
-  minify: true,
-  sourcemap: false,
+  external: [],
+  minify: false,
+  sourcemap: true,
 }).catch(() => process.exit(1));

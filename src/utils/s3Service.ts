@@ -81,13 +81,15 @@ export const generatePresignedUploadUrl = async (
       Bucket: BUCKET_NAME,
       Key: key,
       Fields: {
+        key: key,
         'Content-Type': contentType,
       },
-      Expires: expiresIn,
       Conditions: [
-        ['content-length-range', 0, contentLength * 2], // Allow up to 2x the reported size
+        ['content-length-range', 0, contentLength * 2],
+        ['eq', '$key', key],
         ['eq', '$Content-Type', contentType],
       ],
+      Expires: expiresIn,
     });
     
     console.log('Presigned URL generated:', {
