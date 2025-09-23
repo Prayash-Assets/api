@@ -1,5 +1,6 @@
 import { S3Client, PutObjectCommand, DeleteObjectCommand, GetObjectCommand } from '@aws-sdk/client-s3';
 import { getSignedUrl as getSignedUrlV3 } from '@aws-sdk/s3-request-presigner';
+import { createPresignedPost } from '@aws-sdk/s3-presigned-post';
 
 // Configure AWS S3 Client - Lambda will use execution role automatically
 const s3Client = new S3Client({
@@ -58,6 +59,33 @@ export const getSignedUrl = async (key: string, expiresIn: number = 3600): Promi
   });
 
   return await getSignedUrlV3(s3Client, command, { expiresIn });
+};
+
+export const generatePresignedUploadUrl = async (
+  key: string,
+  contentType: string,
+  contentLength: number,
+  expiresIn: number = 300
+): Promise<{ url: string; fields?: any }> => {
+  try {
+    const { url, fields } = await createPresignedPost(s3Client, {
+      Bucket: BUCKET_NAME,
+      Key: key,
+      Fields: {
+        key: key,
+        'Content-Type': contentType,
+      },
+      Expires: expiresIn,
+    });
+    
+    return {
+      url,
+      fields,
+    };
+  } catch (error) {
+    console.error('Failed to generate presigned URL:', error);
+    throw error;
+  }
 };
 
 export const getFileFromS3 = async (key: string): Promise<Buffer> => {

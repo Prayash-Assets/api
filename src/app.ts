@@ -15,6 +15,7 @@ import { resultRoutes } from "./routes/resultRoutes";
 import settingsRoutes from "./routes/settings.routes";
 import studentRoutes from "./routes/studentRoutes";
 import mediaRoutes from "./routes/mediaRoutes";
+import uploadRoutes from "./routes/uploadRoutes";
 import dashboardRoutes from "./routes/dashboardRoutes";
 import testRoutes from "./routes/testRoutes";
 import webhookRoutes from "./routes/webhookRoutes";
@@ -34,7 +35,7 @@ export const createApp = async (): Promise<FastifyInstance> => {
   // Register multipart plugin for file uploads
   await app.register(require("@fastify/multipart"), {
     limits: {
-      fileSize: 10 * 1024 * 1024, // 10MB limit
+      fileSize: 20 * 1024 * 1024, // 20MB limit
       files: 1, // Allow only 1 file per request
     },
   });
@@ -93,6 +94,7 @@ export const createApp = async (): Promise<FastifyInstance> => {
   await app.register(settingsRoutes, { prefix: "/api/settings" });
   await app.register(studentRoutes, { prefix: "/api/students" });
   await app.register(mediaRoutes, { prefix: "/api/media" });
+  await app.register(uploadRoutes, { prefix: "/api/upload" });
   await app.register(dashboardRoutes, { prefix: "/api/dashboard" });
   await app.register(testRoutes, { prefix: "/api/test" });
   await app.register(webhookRoutes, { prefix: "/api/webhooks" });

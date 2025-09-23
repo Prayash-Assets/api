@@ -4,7 +4,7 @@ import mongoose from "mongoose";
 import { uploadToS3, deleteFromS3, getSignedUrl, getFileFromS3 } from "../utils/s3Service";
 
 // File upload configuration
-const MAX_FILE_SIZE = 10 * 1024 * 1024; // 10MB
+const MAX_FILE_SIZE = 20 * 1024 * 1024; // 20MB
 
 // Restrict to PDF files only
 const ALLOWED_MIME_TYPES = ["application/pdf"];

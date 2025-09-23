@@ -16,6 +16,7 @@
   "description": "",
   "dependencies": {
     "@aws-sdk/client-s3": "^3.826.0",
+    "@aws-sdk/s3-presigned-post": "^3.894.0",
     "@aws-sdk/s3-request-presigner": "^3.826.0",
     "@fastify/aws-lambda": "^5.1.4",
     "@fastify/cors": "^11.0.1",
