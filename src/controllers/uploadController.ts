@@ -65,9 +65,17 @@ export const generatePresignedUrl = async (
   try {
     const { fileName, fileType, fileSize } = request.body;
 
+    console.log('Presigned URL request:', {
+      fileName,
+      fileType,
+      fileSize,
+      user: (request as any).user?.id
+    });
+
     // Validate file type
     const fileTypeValidation = validateFileType(fileName, fileType);
     if (!fileTypeValidation.valid) {
+      console.log('File type validation failed:', fileTypeValidation.error);
       return reply.status(400).send({
         success: false,
         message: fileTypeValidation.error,
@@ -78,6 +86,7 @@ export const generatePresignedUrl = async (
     // Validate file size
     const fileSizeValidation = validateFileSize(fileSize);
     if (!fileSizeValidation.valid) {
+      console.log('File size validation failed:', fileSizeValidation.error);
       return reply.status(400).send({
         success: false,
         message: fileSizeValidation.error,
@@ -93,8 +102,16 @@ export const generatePresignedUrl = async (
     const uniqueFileName = `${timestamp}-${sanitizedName}.pdf`;
     const s3Key = `media/${uniqueFileName}`;
 
+    console.log('Generated S3 key:', s3Key);
+
     // Generate presigned URL
     const presignedData = await generatePresignedUploadUrl(s3Key, fileType, fileSize);
+
+    console.log('Presigned URL generated successfully:', {
+      url: presignedData.url,
+      key: s3Key,
+      fieldsCount: Object.keys(presignedData.fields || {}).length
+    });
 
     reply.send({
       success: true,

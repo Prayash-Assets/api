@@ -68,14 +68,32 @@ export const generatePresignedUploadUrl = async (
   expiresIn: number = 300
 ): Promise<{ url: string; fields?: any }> => {
   try {
+    console.log('Generating presigned URL with params:', {
+      bucket: BUCKET_NAME,
+      key,
+      contentType,
+      contentLength,
+      expiresIn,
+      region: process.env.AWS_REGION
+    });
+
     const { url, fields } = await createPresignedPost(s3Client, {
       Bucket: BUCKET_NAME,
       Key: key,
       Fields: {
-        key: key,
         'Content-Type': contentType,
       },
       Expires: expiresIn,
+      Conditions: [
+        ['content-length-range', 0, contentLength * 2], // Allow up to 2x the reported size
+        ['eq', '$Content-Type', contentType],
+      ],
+    });
+    
+    console.log('Presigned URL generated:', {
+      url,
+      fieldsKeys: Object.keys(fields || {}),
+      keyField: fields?.key
     });
     
     return {
