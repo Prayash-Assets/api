@@ -29,7 +29,6 @@ async function uploadRoutes(fastify: FastifyInstance) {
               success: { type: "boolean" },
               uploadUrl: { type: "string" },
               key: { type: "string" },
-              fields: { type: "object" },
               expiresIn: { type: "number" }
             },
           },

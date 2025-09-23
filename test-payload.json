@@ -1,0 +1,14 @@
+{
+  "httpMethod": "GET",
+  "path": "/",
+  "headers": {
+    "Content-Type": "application/json"
+  },
+  "queryStringParameters": null,
+  "body": null,
+  "requestContext": {
+    "http": {
+      "method": "GET"
+    }
+  }
+}

@@ -66,9 +66,9 @@ export const generatePresignedUploadUrl = async (
   contentType: string,
   contentLength: number,
   expiresIn: number = 300
-): Promise<{ url: string; fields?: any }> => {
+): Promise<{ url: string }> => {
   try {
-    console.log('Generating presigned URL with params:', {
+    console.log('Generating presigned PUT URL with params:', {
       bucket: BUCKET_NAME,
       key,
       contentType,
@@ -77,31 +77,17 @@ export const generatePresignedUploadUrl = async (
       region: process.env.AWS_REGION
     });
 
-    const { url, fields } = await createPresignedPost(s3Client, {
+    const command = new PutObjectCommand({
       Bucket: BUCKET_NAME,
       Key: key,
-      Fields: {
-        key: key,
-        'Content-Type': contentType,
-      },
-      Conditions: [
-        ['content-length-range', 0, contentLength * 2],
-        ['eq', '$key', key],
-        ['eq', '$Content-Type', contentType],
-      ],
-      Expires: expiresIn,
+      ContentType: contentType,
     });
+
+    const url = await getSignedUrlV3(s3Client, command, { expiresIn });
     
-    console.log('Presigned URL generated:', {
-      url,
-      fieldsKeys: Object.keys(fields || {}),
-      keyField: fields?.key
-    });
+    console.log('Presigned PUT URL generated:', { url });
     
-    return {
-      url,
-      fields,
-    };
+    return { url };
   } catch (error) {
     console.error('Failed to generate presigned URL:', error);
     throw error;

@@ -107,17 +107,15 @@ export const generatePresignedUrl = async (
     // Generate presigned URL
     const presignedData = await generatePresignedUploadUrl(s3Key, fileType, fileSize);
 
-    console.log('Presigned URL generated successfully:', {
+    console.log('Presigned PUT URL generated successfully:', {
       url: presignedData.url,
-      key: s3Key,
-      fieldsCount: Object.keys(presignedData.fields || {}).length
+      key: s3Key
     });
 
     reply.send({
       success: true,
       uploadUrl: presignedData.url,
       key: s3Key,
-      fields: presignedData.fields,
       expiresIn: 300, // 5 minutes
     });
   } catch (error) {
