@@ -5,6 +5,7 @@ import { IUser } from "./User";
 export interface IResult extends Document {
   student: Types.ObjectId | IUser;
   mockTest: Types.ObjectId | IMockTest;
+  package?: Types.ObjectId; // Track which package this test was taken from
   startTime: Date;
   endTime: Date;
   score: number;
@@ -70,6 +71,11 @@ const ResultSchema = new Schema<IResult>(
       type: Schema.Types.ObjectId,
       ref: "MockTest",
       required: true,
+    },
+    package: {
+      type: Schema.Types.ObjectId,
+      ref: "Package",
+      required: false,
     },
     startTime: {
       type: Date,
@@ -160,9 +166,14 @@ const ResultSchema = new Schema<IResult>(
 );
 
 // Create indexes for better performance
+// Remove old index and create new one with package field
 ResultSchema.index(
   { student: 1, mockTest: 1, attemptNumber: 1 },
-  { unique: true }
+  { unique: false }
+);
+ResultSchema.index(
+  { student: 1, mockTest: 1, package: 1, attemptNumber: 1 },
+  { unique: true, sparse: true }
 );
 ResultSchema.index({ student: 1, createdAt: -1 });
 ResultSchema.index({ mockTest: 1, createdAt: -1 });

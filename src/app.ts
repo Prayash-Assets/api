@@ -19,6 +19,7 @@ import uploadRoutes from "./routes/uploadRoutes";
 import dashboardRoutes from "./routes/dashboardRoutes";
 import testRoutes from "./routes/testRoutes";
 import webhookRoutes from "./routes/webhookRoutes";
+import fileRoutes from "./routes/fileRoutes";
 
 import cors from "@fastify/cors";
 
@@ -98,6 +99,7 @@ export const createApp = async (): Promise<FastifyInstance> => {
   await app.register(dashboardRoutes, { prefix: "/api/dashboard" });
   await app.register(testRoutes, { prefix: "/api/test" });
   await app.register(webhookRoutes, { prefix: "/api/webhooks" });
+  await app.register(fileRoutes, { prefix: "/api/files" });
 
   return app;
 };

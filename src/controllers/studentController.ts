@@ -65,6 +65,7 @@ export const getPurchasedPackages = async (
       status: "captured"
     }).populate({
       path: "package",
+      select: "name description price files links mockTests",
       populate: {
         path: "mockTests",
         select: "title description duration totalMarks status testType",
@@ -100,6 +101,8 @@ export const getPurchasedPackages = async (
         description: pkg.description,
         price: pkg.price,
         mockTests: pkg.mockTests || [],
+        files: pkg.files || [],
+        links: pkg.links || [],
         purchaseDate: purchaseDate.toISOString(),
         expiryDate: expiryDate.toISOString(),
         isActive: expiryDate > new Date(),
@@ -345,8 +348,23 @@ export const submitMockTest = async (request: TestRequest, reply: FastifyReply) 
     const percentage = totalMarks > 0 ? (score / totalMarks) * 100 : 0;
     const isPassed = score >= mockTest.passingMarks;
 
-    // Check for existing attempts
-    const existingResults = await Result.find({ student: userId, mockTest: testId });
+    // Check for existing attempts for this package-test combination
+    const { packageId } = request.body as { packageId?: string };
+    let existingResults;
+    if (packageId) {
+      // For package-specific submissions, only count attempts with this package
+      existingResults = await Result.find({ 
+        student: userId, 
+        mockTest: testId, 
+        package: packageId 
+      });
+    } else {
+      // For non-package submissions, count all attempts
+      existingResults = await Result.find({ 
+        student: userId, 
+        mockTest: testId 
+      });
+    }
     const attemptNumber = existingResults.length + 1;
 
     // Create result record
@@ -364,6 +382,7 @@ export const submitMockTest = async (request: TestRequest, reply: FastifyReply) 
     const result = new Result({
       student: userId,
       mockTest: testId,
+      package: packageId || undefined,
       startTime: new Date(Date.now() - (mockTest.duration * 60 * 1000)), // Approximate start time
       endTime: new Date(),
       score,
@@ -404,15 +423,22 @@ export const submitMockTest = async (request: TestRequest, reply: FastifyReply) 
 
 export const getStudentResults = async (request: TestRequest, reply: FastifyReply) => {
   try {
+    const { packageId } = request.query as { packageId?: string };
+    
     let userId = (request as any).user?.id;
     if (!userId) {
       const user = await User.findOne({ email: "daniel@inovitrix.com" });
       userId = user?._id;
     }
 
-    const results = await Result.find({ student: userId })
+    const query: any = { student: userId };
+    if (packageId) {
+      query.package = packageId;
+    }
+
+    const results = await Result.find(query)
       .populate('mockTest', 'title description duration totalMarks')
-      .sort({ createdAt: -1 });
+      .sort({ attemptNumber: -1, createdAt: -1 });
 
     reply.send(results);
   } catch (error: any) {
@@ -424,6 +450,7 @@ export const getStudentResults = async (request: TestRequest, reply: FastifyRepl
 export const getDetailedTestResult = async (request: TestRequest, reply: FastifyReply) => {
   try {
     const { id: testId } = request.params as { id: string };
+    const { packageId } = request.query as { packageId?: string };
     
     let userId = (request as any).user?.id;
     if (!userId) {
@@ -431,19 +458,21 @@ export const getDetailedTestResult = async (request: TestRequest, reply: Fastify
       userId = user?._id;
     }
 
-    const result = await Result.findOne({ 
-      student: userId, 
-      mockTest: testId 
-    })
-    .populate('mockTest', 'title description duration totalMarks')
-    .populate('answers.question', 'question options correctAnswer')
-    .sort({ createdAt: -1 });
-
-    if (!result) {
-      return reply.status(404).send({ error: "Result not found" });
+    const query: any = { student: userId, mockTest: testId };
+    if (packageId) {
+      query.package = packageId;
     }
 
-    reply.send(result);
+    const results = await Result.find(query)
+    .populate('mockTest', 'title description duration totalMarks')
+    .populate('answers.question', 'question options correctAnswer')
+    .sort({ attemptNumber: -1 });
+
+    if (!results.length) {
+      return reply.status(404).send({ error: "Results not found" });
+    }
+
+    reply.send(results);
   } catch (error: any) {
     console.error("Get detailed test result error:", error.message);
     reply.status(500).send({ error: "Internal Server Error" });
@@ -453,6 +482,7 @@ export const getDetailedTestResult = async (request: TestRequest, reply: Fastify
 export const checkTestAttemptEligibility = async (request: TestRequest, reply: FastifyReply) => {
   try {
     const { id: testId } = request.params as { id: string };
+    const { packageId } = request.query as { packageId?: string };
     
     let userId = (request as any).user?.id;
     if (!userId) {
@@ -466,8 +496,22 @@ export const checkTestAttemptEligibility = async (request: TestRequest, reply: F
       return reply.status(404).send({ error: "Mock test not found" });
     }
 
-    // Check existing attempts
-    const existingAttempts = await Result.find({ student: userId, mockTest: testId });
+    // Check existing attempts for this specific package-test combination
+    let existingAttempts;
+    if (packageId) {
+      // For package-specific requests, only count attempts with this package
+      existingAttempts = await Result.find({ 
+        student: userId, 
+        mockTest: testId, 
+        package: packageId 
+      });
+    } else {
+      // For non-package requests, count all attempts
+      existingAttempts = await Result.find({ 
+        student: userId, 
+        mockTest: testId 
+      });
+    }
     const maxAttempts = mockTest.numberOfAttempts || 1;
     const attemptsUsed = existingAttempts.length;
     const remainingAttempts = Math.max(0, maxAttempts - attemptsUsed);
