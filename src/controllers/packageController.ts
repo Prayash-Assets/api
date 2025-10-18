@@ -91,7 +91,7 @@ export const createPackage = async (
     // Populate mock tests for response
     await newPackage.populate({
       path: "mockTests",
-      select: "title description duration totalMarks status",
+      select: "title description duration totalMarks status testType",
     });
 
     logger.info("Package created successfully", { id: newPackage._id });
@@ -116,7 +116,7 @@ export const getAllPackages = async (
     const packages = await Package.find()
       .populate({
         path: "mockTests",
-        select: "title description duration totalMarks status",
+        select: "title description duration totalMarks status testType",
       })
       .sort({ createdAt: -1 });
 
@@ -144,7 +144,7 @@ export const getPackageById = async (
 
     const pkg = await Package.findById(packageId).populate({
       path: "mockTests",
-      select: "title description duration totalMarks status questions",
+      select: "title description duration totalMarks status testType questions",
       populate: {
         path: "questions",
         select: "text difficulty",
@@ -209,7 +209,7 @@ export const updatePackage = async (
       runValidators: true,
     }).populate({
       path: "mockTests",
-      select: "title description duration totalMarks status",
+      select: "title description duration totalMarks status testType",
     });
 
     if (!updatedPackage) {
@@ -275,7 +275,7 @@ export const getAvailablePackages = async (
     })
       .populate({
         path: "mockTests",
-        select: "title description duration totalMarks status",
+        select: "title description duration totalMarks status testType",
       })
       .select(
         "name description price originalPrice discountPercentage duration files links createdAt published mockTests"

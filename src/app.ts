@@ -20,6 +20,7 @@ import dashboardRoutes from "./routes/dashboardRoutes";
 import testRoutes from "./routes/testRoutes";
 import webhookRoutes from "./routes/webhookRoutes";
 import fileRoutes from "./routes/fileRoutes";
+import { validateSession } from "./middleware/sessionMiddleware";
 
 import cors from "@fastify/cors";
 
@@ -50,7 +51,7 @@ export const createApp = async (): Promise<FastifyInstance> => {
       'https://www.prayashassets.com' // Production frontend with www
     ],
     methods: ["GET", "PUT", "POST", "DELETE", "OPTIONS"],
-    allowedHeaders: ["Content-Type", "Authorization", "Origin", "Accept", "X-Requested-With"],
+    allowedHeaders: ["Content-Type", "Authorization", "Origin", "Accept", "X-Requested-With", "X-Session-ID"],
     credentials: true,
     preflightContinue: false,
     optionsSuccessStatus: 200
@@ -69,6 +70,9 @@ export const createApp = async (): Promise<FastifyInstance> => {
 
   // Connect to Database (ensure connection is established)
   await connectDB();
+
+  // Add session validation middleware
+  app.addHook("onRequest", validateSession);
 
   // Root endpoint - register first
   app.get("/", async (request, reply) => {

@@ -12,6 +12,7 @@ import {
   verifyToken,
   verifyEmail,
   resendVerification,
+  validateSession,
 } from "../controllers/authController";
 import { checkRoles } from "../middleware/rbacMiddleware";
 
@@ -43,4 +44,9 @@ export default async function authRoutes(fastify: FastifyInstance) {
     changePassword
   );
   fastify.get("/verify-token", verifyToken);
+  fastify.get(
+    "/validate-session",
+    { preHandler: [checkRoles(["student", "admin"])] },
+    validateSession
+  );
 }

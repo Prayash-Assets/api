@@ -2,6 +2,7 @@ import { FastifyReply, FastifyRequest } from "fastify";
 import Joi from "joi";
 import bcrypt from "bcryptjs";
 import jwt from "jsonwebtoken";
+import { randomUUID } from "crypto";
 import User, { IUser, Student, Admin, IStudent, IAdmin } from "../models/User";
 import Role from "../models/Role";
 import logger from "../config/logger";
@@ -339,6 +340,13 @@ export async function login(request: FastifyRequest, reply: FastifyReply) {
       });
     }
 
+    // Generate session ID for single device login
+    const sessionId = randomUUID();
+    
+    // Update user's active session
+    user.activeSessionId = sessionId;
+    await user.save();
+
     // Generate tokens
     const accessToken = generateToken(user, "1h");
     const refreshToken = generateToken(user, "7d");
@@ -346,6 +354,7 @@ export async function login(request: FastifyRequest, reply: FastifyReply) {
     logger.info("User logged in successfully", {
       userId: user.id,
       userType: user.userType,
+      sessionId
     });
 
     // Build complete user response based on user type
@@ -377,6 +386,7 @@ export async function login(request: FastifyRequest, reply: FastifyReply) {
       user: userResponse,
       accessToken,
       refreshToken,
+      sessionId,
     });
   } catch (err: any) {
     logger.error("Login error", { error: err.message, stack: err.stack });
@@ -389,6 +399,18 @@ export async function login(request: FastifyRequest, reply: FastifyReply) {
  */
 export async function logout(request: FastifyRequest, reply: FastifyReply) {
   try {
+    const userId = (request as any).user?.id;
+    
+    if (userId) {
+      // Clear active session ID
+      const user = await User.findById(userId);
+      if (user) {
+        user.activeSessionId = undefined;
+        await user.save();
+        logger.info("User session cleared", { userId });
+      }
+    }
+    
     logger.info("Logout attempt");
     reply.send({ message: "Logout successful" });
     logger.info("User logged out successfully");
@@ -801,6 +823,62 @@ export async function verifyEmail(
       stack: err.stack,
     });
     reply.status(500).send({ error: "Internal Server Error" });
+  }
+}
+
+/**
+ * Validate current session
+ */
+export async function validateSession(
+  request: FastifyRequest,
+  reply: FastifyReply
+) {
+  try {
+    const userId = (request as any).user?.id;
+    const sessionId = request.headers['x-session-id'] as string;
+
+    if (!userId || !sessionId) {
+      return reply.status(401).send({ 
+        valid: false, 
+        message: "Missing user ID or session ID" 
+      });
+    }
+
+    const user = await User.findById(userId);
+    if (!user) {
+      return reply.status(404).send({ 
+        valid: false, 
+        message: "User not found" 
+      });
+    }
+
+    // Check if session matches
+    if (user.activeSessionId !== sessionId) {
+      logger.warn("Session validation failed - session mismatch", {
+        userId,
+        activeSession: user.activeSessionId,
+        requestSession: sessionId
+      });
+      
+      return reply.status(403).send({ 
+        valid: false, 
+        message: "Session invalid - logged in from another device" 
+      });
+    }
+
+    reply.send({ 
+      valid: true, 
+      message: "Session is valid" 
+    });
+  } catch (err: any) {
+    logger.error("Validate session error", {
+      error: err.message,
+      stack: err.stack,
+    });
+    reply.status(500).send({ 
+      valid: false, 
+      message: "Internal Server Error" 
+    });
   }
 }
 

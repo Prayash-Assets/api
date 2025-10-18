@@ -16,6 +16,8 @@ export interface IUser extends Document {
   isVerified: boolean;
   verificationAttempts?: number;
   lastCodeSentAt?: Date;
+  // Session management for single device login
+  activeSessionId?: string;
   createdAt: Date;
   updatedAt: Date;
 }
@@ -87,6 +89,11 @@ const baseUserSchema: Schema = new mongoose.Schema(
     },
     lastCodeSentAt: {
       type: Date,
+      sparse: true, // Allows for null values
+    },
+    // Session management for single device login
+    activeSessionId: {
+      type: String,
       sparse: true, // Allows for null values
     },
   },
