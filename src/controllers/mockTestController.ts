@@ -116,48 +116,45 @@ export const createMockTest = async (
 };
 
 export const getAllMockTests = async (
-  request: FastifyRequest,
+  request: FastifyRequest<{ Querystring: { page?: string; limit?: string } }>,
   reply: FastifyReply
 ) => {
   try {
-    logger.info("Attempting to fetch all mock tests");
-    const mockTests = await MockTest.find().populate({
-      path: "questions",
-      populate: [
-        {
-          path: "category_id",
-          select: "name",
-          options: { strictPopulate: false },
-        },
-        {
-          path: "subject_id",
-          select: "name",
-          options: { strictPopulate: false },
-        },
-        {
-          path: "level_id",
-          select: "name",
-          options: { strictPopulate: false },
-        },
-      ],
+    logger.info("Attempting to fetch paginated mock tests");
+
+    // Parse query parameters with defaults
+    const page = parseInt(request.query.page || "1", 10);
+    const limit = parseInt(request.query.limit || "10", 10);
+
+    // Ensure positive values
+    const pageNum = Math.max(1, page);
+    const limitNum = Math.max(1, Math.min(100, limit)); // Cap at 100 for safety
+
+    // Get total count
+    const total = await MockTest.countDocuments();
+
+    // Calculate pagination values
+    const totalPages = Math.ceil(total / limitNum);
+    const skip = (pageNum - 1) * limitNum;
+
+    // Fetch mock tests without population to avoid large payloads
+    const mockTests = await MockTest.find().skip(skip).limit(limitNum);
+
+    logger.info("Successfully fetched paginated mock tests", {
+      page: pageNum,
+      limit: limitNum,
+      total,
     });
 
-    // Transform the response to match frontend expectations
-    const transformedMockTests = mockTests.map((mockTest) => {
-      const mockTestObj = mockTest.toObject();
-      if (mockTestObj.questions) {
-        mockTestObj.questions = mockTestObj.questions.map((question: any) => ({
-          ...question,
-          category: question.category_id,
-          subject: question.subject_id,
-          level: question.level_id,
-        }));
-      }
-      return mockTestObj;
+    reply.send({
+      data: mockTests,
+      pagination: {
+        currentPage: pageNum,
+        totalPages,
+        totalItems: total,
+        itemsPerPage: limitNum,
+      },
     });
-
-    logger.info("Successfully fetched all mock tests");
-    reply.send(transformedMockTests);
   } catch (error) {
     logger.error("Error fetching mockTests", { error });
     reply.status(500).send({ message: "Error fetching mockTests", error });
