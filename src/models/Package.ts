@@ -119,31 +119,40 @@ packageSchema.methods.getOriginalPrice = function () {
 
 // Pre-save middleware to handle price calculations
 packageSchema.pre("save", function (next) {
-  // If discount is being set and originalPrice is not set, store current price as originalPrice
-  if (
-    this.discountPercentage &&
-    this.discountPercentage > 0 &&
-    !this.originalPrice
-  ) {
-    this.originalPrice = this.price;
+  // Check if this is a new document or if price/discount fields have changed
+  const isNew = this.isNew;
+  const priceChanged = this.isModified("price");
+  const discountChanged = this.isModified("discountPercentage");
+
+  // If neither price nor discount changed, skip recalculation
+  if (!isNew && !priceChanged && !discountChanged) {
+    return next();
   }
 
-  // If discount is removed, restore price from originalPrice
-  if (
-    (!this.discountPercentage || this.discountPercentage === 0) &&
-    this.originalPrice
-  ) {
-    this.price = this.originalPrice;
-    this.originalPrice = undefined; // Use undefined instead of null
-  }
-
-  // If discount is applied, calculate new price
+  // Case 1: Discount is being applied or increased
   if (
     this.discountPercentage &&
-    this.discountPercentage > 0 &&
-    this.originalPrice
+    this.discountPercentage > 0
   ) {
-    this.price = this.originalPrice * (1 - this.discountPercentage / 100);
+    // If this is a new document or price was just changed, treat incoming price as original
+    if (isNew || priceChanged) {
+      // Store the incoming price as original price
+      this.originalPrice = this.price;
+      // Calculate discounted price
+      this.price = this.originalPrice * (1 - this.discountPercentage / 100);
+    }
+    // If only discount changed but price stayed the same, recalculate from originalPrice
+    else if (discountChanged && this.originalPrice) {
+      this.price = this.originalPrice * (1 - this.discountPercentage / 100);
+    }
+  }
+  // Case 2: Discount is being removed
+  else if (!this.discountPercentage || this.discountPercentage === 0) {
+    if (this.originalPrice) {
+      // Restore price from originalPrice
+      this.price = this.originalPrice;
+      this.originalPrice = undefined;
+    }
   }
 
   next();
