@@ -143,14 +143,29 @@ export const updateSubject = async (
  * Deletes a subject by its ID.
  * @param request - The Fastify request object, containing the subject ID in the params.
  * @param reply - The Fastify reply object.
- * @returns A success message or an error message if not found.
+ * @returns A success message or an error message if not found or if referenced.
  */
 export const deleteSubject = async (
   request: FastifyRequest<{ Params: { id: string } }>,
   reply: FastifyReply
 ) => {
   try {
-    const deletedSubject = await Subject.findByIdAndDelete(request.params.id);
+    const subjectId = request.params.id;
+    
+    // Check if subject is referenced by any questions
+    const questionCount = await Question.countDocuments({
+      subject_id: subjectId,
+    });
+    
+    if (questionCount > 0) {
+      return reply.status(409).send({
+        message: `Cannot delete subject. It is referenced by ${questionCount} question${questionCount > 1 ? "s" : ""}. Please remove or reassign these questions first.`,
+        error: "SUBJECT_IN_USE",
+        referencedCount: questionCount,
+      });
+    }
+    
+    const deletedSubject = await Subject.findByIdAndDelete(subjectId);
     if (!deletedSubject) {
       return reply.status(404).send({ message: "Subject not found" });
     }

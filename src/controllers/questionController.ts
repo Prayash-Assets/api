@@ -213,8 +213,24 @@ export const deleteQuestion = async (
   reply: FastifyReply
 ) => {
   try {
+    const questionId = request.params.id;
+    
+    // Check if question is referenced by any mock tests
+    const { MockTest } = await import("../models/MockTest");
+    const mockTestCount = await MockTest.countDocuments({
+      questions: questionId,
+    });
+    
+    if (mockTestCount > 0) {
+      return reply.status(409).send({
+        message: `Cannot delete question. It is referenced by ${mockTestCount} mock test${mockTestCount > 1 ? "s" : ""}. Please remove this question from those tests first.`,
+        error: "QUESTION_IN_USE",
+        referencedCount: mockTestCount,
+      });
+    }
+    
     const question = await Question.findByIdAndDelete({
-      _id: request.params.id,
+      _id: questionId,
     });
     if (!question) {
       return reply.status(404).send({ message: "Question not found" });

@@ -378,6 +378,37 @@ export const deleteMockTest = async (
   try {
     const mockTestId = request.params.id;
     logger.info(`Attempting to delete mock test with ID: ${mockTestId}`);
+    
+    // Check if mock test is referenced by any packages
+    const Package = await import("../models/Package");
+    const packageCount = await Package.default.countDocuments({
+      mockTests: mockTestId,
+    });
+    
+    if (packageCount > 0) {
+      logger.warn("MockTest in use by packages", { id: mockTestId, packageCount });
+      return reply.status(409).send({
+        message: `Cannot delete mock test. It is referenced by ${packageCount} package${packageCount > 1 ? "s" : ""}. Please remove this test from those packages first.`,
+        error: "MOCKTEST_IN_USE_BY_PACKAGE",
+        referencedCount: packageCount,
+      });
+    }
+    
+    // Check if mock test is referenced by any results
+    const { Result } = await import("../models/Result");
+    const resultCount = await Result.countDocuments({
+      mockTest: mockTestId,
+    });
+    
+    if (resultCount > 0) {
+      logger.warn("MockTest has existing results", { id: mockTestId, resultCount });
+      return reply.status(409).send({
+        message: `Cannot delete mock test. It has ${resultCount} test result${resultCount > 1 ? "s" : ""} associated with it. Please delete those results first.`,
+        error: "MOCKTEST_IN_USE_BY_RESULT",
+        referencedCount: resultCount,
+      });
+    }
+    
     const mockTest = await MockTest.findByIdAndDelete(mockTestId);
     if (!mockTest) {
       logger.warn("MockTest not found for deletion", { id: mockTestId });

@@ -119,41 +119,71 @@ packageSchema.methods.getOriginalPrice = function () {
 
 // Pre-save middleware to handle price calculations
 packageSchema.pre("save", function (next) {
-  // Check if this is a new document or if price/discount fields have changed
   const isNew = this.isNew;
   const priceChanged = this.isModified("price");
   const discountChanged = this.isModified("discountPercentage");
+  const originalPriceChanged = this.isModified("originalPrice");
 
-  // If neither price nor discount changed, skip recalculation
-  if (!isNew && !priceChanged && !discountChanged) {
+  // If nothing relevant changed, skip
+  if (!isNew && !priceChanged && !discountChanged && !originalPriceChanged) {
     return next();
   }
 
-  // Case 1: Discount is being applied or increased
-  if (
-    this.discountPercentage &&
-    this.discountPercentage > 0
-  ) {
-    // If this is a new document or price was just changed, treat incoming price as original
-    if (isNew || priceChanged) {
-      // Store the incoming price as original price
+  console.log("Pre-save middleware - Before processing:", {
+    isNew,
+    priceChanged,
+    discountChanged,
+    originalPriceChanged,
+    price: this.price,
+    originalPrice: this.originalPrice,
+    discountPercentage: this.discountPercentage,
+  });
+
+  // Case 1: Discount exists (being applied or modified)
+  if (this.discountPercentage && this.discountPercentage > 0) {
+    const discount = this.discountPercentage as number;
+    
+    if (isNew) {
+      // New document: treat price as original, calculate discounted
       this.originalPrice = this.price;
-      // Calculate discounted price
-      this.price = this.originalPrice * (1 - this.discountPercentage / 100);
-    }
-    // If only discount changed but price stayed the same, recalculate from originalPrice
-    else if (discountChanged && this.originalPrice) {
-      this.price = this.originalPrice * (1 - this.discountPercentage / 100);
+      this.price = this.originalPrice * (1 - discount / 100);
+    } else if (originalPriceChanged && this.originalPrice) {
+      // Original price explicitly set: use it to calculate discounted price
+      this.price = this.originalPrice * (1 - discount / 100);
+    } else if (priceChanged && !originalPriceChanged && !this.originalPrice) {
+      // Price changed but no original price set: treat price as original
+      this.originalPrice = this.price;
+      this.price = this.originalPrice * (1 - discount / 100);
+    } else if (discountChanged && this.originalPrice) {
+      // Only discount changed: recalculate from existing original price
+      this.price = this.originalPrice * (1 - discount / 100);
+    } else if (
+      discountChanged &&
+      !this.originalPrice &&
+      this.price
+    ) {
+      // Discount changed but no original price: treat current price as original
+      this.originalPrice = this.price;
+      this.price = this.originalPrice * (1 - discount / 100);
+    } else if (this.originalPrice && this.originalPrice === this.price) {
+      // Bug fix: originalPrice and price are same - fix it
+      this.price = this.originalPrice * (1 - discount / 100);
     }
   }
-  // Case 2: Discount is being removed
-  else if (!this.discountPercentage || this.discountPercentage === 0) {
+  // Case 2: No discount (being removed or not set)
+  else {
     if (this.originalPrice) {
-      // Restore price from originalPrice
+      // Clear discount: restore original price and remove originalPrice field
       this.price = this.originalPrice;
       this.originalPrice = undefined;
     }
   }
+
+  console.log("Pre-save middleware - After processing:", {
+    price: this.price,
+    originalPrice: this.originalPrice,
+    discountPercentage: this.discountPercentage,
+  });
 
   next();
 });

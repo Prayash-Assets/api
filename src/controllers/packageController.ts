@@ -47,6 +47,7 @@ const updatePackageSchema = Joi.object({
   links: Joi.array().items(Joi.string().uri()).optional(),
   duration: Joi.number().integer().min(1).max(365).optional(),
   price: Joi.number().min(0).max(99999.99).optional(),
+  originalPrice: Joi.number().min(0).max(99999.99).optional(),
   discountPercentage: Joi.number().min(0).max(100).optional().allow(null),
   published: Joi.boolean().optional(),
   publicView: Joi.boolean().optional(),
@@ -204,18 +205,35 @@ export const updatePackage = async (
       }
     }
 
-    const updatedPackage = await Package.findByIdAndUpdate(packageId, value, {
-      new: true,
-      runValidators: true,
-    }).populate({
-      path: "mockTests",
-      select: "title description duration totalMarks status testType",
-    });
-
-    if (!updatedPackage) {
+    // Fetch the package first to trigger pre-save middleware
+    const pkg = await Package.findById(packageId);
+    if (!pkg) {
       logger.warn("Package not found for update", { id: packageId });
       return res.status(404).send({ message: "Package not found" });
     }
+
+    // Update all fields from the request
+    Object.assign(pkg, value);
+
+    // Explicitly mark price and discount fields as modified to ensure pre-save middleware runs
+    if (value.price !== undefined) {
+      pkg.markModified("price");
+    }
+    if (value.discountPercentage !== undefined) {
+      pkg.markModified("discountPercentage");
+    }
+    if (value.originalPrice !== undefined) {
+      pkg.markModified("originalPrice");
+    }
+
+    // Save the document - this will trigger pre-save middleware for price calculations
+    const updatedPackage = await pkg.save();
+
+    // Populate mock tests for response
+    await updatedPackage.populate({
+      path: "mockTests",
+      select: "title description duration totalMarks status testType",
+    });
 
     logger.info("Package updated successfully", { id: packageId });
     res.status(200).send(updatedPackage);
@@ -236,6 +254,51 @@ export const deletePackage = async (
   try {
     const packageId = req.params.id;
     logger.info(`Attempting to delete package with ID: ${packageId}`);
+
+    // Check if package is referenced by any purchases
+    const Purchase = await import("../models/Purchase");
+    const purchaseCount = await Purchase.default.countDocuments({
+      package: packageId,
+    });
+
+    if (purchaseCount > 0) {
+      logger.warn("Package has existing purchases", { id: packageId, purchaseCount });
+      return res.status(409).send({
+        message: `Cannot delete package. It has ${purchaseCount} purchase${purchaseCount > 1 ? "es" : ""} associated with it. Please remove or refund those purchases first.`,
+        error: "PACKAGE_IN_USE_BY_PURCHASE",
+        referencedCount: purchaseCount,
+      });
+    }
+
+    // Check if package is referenced by any test results
+    const { Result } = await import("../models/Result");
+    const resultCount = await Result.countDocuments({
+      package: packageId,
+    });
+
+    if (resultCount > 0) {
+      logger.warn("Package has existing test results", { id: packageId, resultCount });
+      return res.status(409).send({
+        message: `Cannot delete package. It has ${resultCount} test result${resultCount > 1 ? "s" : ""} associated with it. Please delete those results first.`,
+        error: "PACKAGE_IN_USE_BY_RESULT",
+        referencedCount: resultCount,
+      });
+    }
+
+    // Check if package is assigned to any users
+    const User = await import("../models/User");
+    const userCount = await User.default.countDocuments({
+      packages: packageId,
+    });
+
+    if (userCount > 0) {
+      logger.warn("Package assigned to users", { id: packageId, userCount });
+      return res.status(409).send({
+        message: `Cannot delete package. It is assigned to ${userCount} user${userCount > 1 ? "s" : ""}. Please remove it from those users first.`,
+        error: "PACKAGE_IN_USE_BY_USER",
+        referencedCount: userCount,
+      });
+    }
 
     const deletedPackage = await Package.findByIdAndDelete(packageId);
     if (!deletedPackage) {

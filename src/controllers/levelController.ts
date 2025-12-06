@@ -147,14 +147,29 @@ export const updateLevel = async (
  * Delete a level by ID.
  * @param request - The Fastify request object, containing the level ID in the params.
  * @param reply - The Fastify reply object.
- * @returns A success message or an error message.
+ * @returns A success message or an error message if not found or if referenced.
  */
 export const deleteLevel = async (
   request: FastifyRequest<{ Params: { id: string } }>,
   reply: FastifyReply
 ) => {
   try {
-    const deletedLevel = await Level.findByIdAndDelete(request.params.id);
+    const levelId = request.params.id;
+    
+    // Check if level is referenced by any questions
+    const questionCount = await Question.countDocuments({
+      level_id: levelId,
+    });
+    
+    if (questionCount > 0) {
+      return reply.status(409).send({
+        message: `Cannot delete level. It is referenced by ${questionCount} question${questionCount > 1 ? "s" : ""}. Please remove or reassign these questions first.`,
+        error: "LEVEL_IN_USE",
+        referencedCount: questionCount,
+      });
+    }
+    
+    const deletedLevel = await Level.findByIdAndDelete(levelId);
     if (!deletedLevel) {
       return reply.status(404).send({ message: "Level not found" });
     }

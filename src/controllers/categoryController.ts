@@ -142,14 +142,29 @@ export const updateCategory = async (
  * Deletes a category by its ID.
  * @param request - The Fastify request object, containing the category ID in the params.
  * @param reply - The Fastify reply object.
- * @returns A success message or an error message if not found.
+ * @returns A success message or an error message if not found or if referenced.
  */
 export const deleteCategory = async (
   request: FastifyRequest<{ Params: { id: string } }>,
   reply: FastifyReply
 ) => {
   try {
-    const deletedCategory = await Category.findByIdAndDelete(request.params.id);
+    const categoryId = request.params.id;
+    
+    // Check if category is referenced by any questions
+    const questionCount = await Question.countDocuments({
+      category_id: categoryId,
+    });
+    
+    if (questionCount > 0) {
+      return reply.status(409).send({
+        message: `Cannot delete category. It is referenced by ${questionCount} question${questionCount > 1 ? "s" : ""}. Please remove or reassign these questions first.`,
+        error: "CATEGORY_IN_USE",
+        referencedCount: questionCount,
+      });
+    }
+    
+    const deletedCategory = await Category.findByIdAndDelete(categoryId);
     if (!deletedCategory) {
       return reply.status(404).send({ message: "Category not found" });
     }
