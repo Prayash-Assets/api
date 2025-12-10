@@ -50,7 +50,7 @@ export const getPurchasedPackages = async (
   try {
     // Find user by email if no authenticated user
     let userId = (request as any).user?.id;
-    
+
     if (!userId) {
       const user = await User.findOne({ email: "daniel@inovitrix.com" });
       userId = user?._id;
@@ -60,12 +60,13 @@ export const getPurchasedPackages = async (
     console.log("DEBUG: User from request:", (request as any).user);
 
     // Find all successful purchases for this user
+
     const purchases = await Purchase.find({
       user: userId,
       status: "captured"
     }).populate({
       path: "package",
-      select: "name description price files links mockTests",
+      select: "name description price originalPrice discountPercentage validityDays files links mockTests",
       populate: {
         path: "mockTests",
         select: "title description duration totalMarks status testType",
@@ -81,7 +82,7 @@ export const getPurchasedPackages = async (
     // Extract packages with purchase details
     const packagesWithDetails = purchases.map((purchase: any) => {
       const pkg = purchase.package;
-      
+
       console.log("DEBUG: Processing purchase:", {
         purchaseId: purchase._id,
         packageId: pkg._id,
@@ -100,6 +101,9 @@ export const getPurchasedPackages = async (
         name: pkg.name,
         description: pkg.description,
         price: pkg.price,
+        originalPrice: pkg.originalPrice,
+        discountPercentage: pkg.discountPercentage,
+        duration: validityDays,
         mockTests: pkg.mockTests || [],
         files: pkg.files || [],
         links: pkg.links || [],
@@ -164,9 +168,9 @@ export const getAvailableMockTests = async (
       const user = await User.findOne({ email: "daniel@inovitrix.com" });
       userId = user?._id;
     }
-    
+
     console.log("🔍 Fetching available mock tests for user:", userId);
-    
+
     // Find all successful purchases for this user
     const purchases = await Purchase.find({
       user: userId,
@@ -178,10 +182,10 @@ export const getAvailableMockTests = async (
         select: "title description duration totalMarks status testType numberOfQuestions",
       },
     });
-    
+
     // Extract all mock tests from purchased packages
     const availableMockTests: any[] = [];
-    
+
     purchases.forEach((purchase: any) => {
       const pkg = purchase.package;
       if (pkg && pkg.mockTests) {
@@ -197,9 +201,9 @@ export const getAvailableMockTests = async (
         });
       }
     });
-    
+
     console.log("✅ Found available mock tests:", availableMockTests.length);
-    
+
     reply.send(availableMockTests);
   } catch (error: any) {
     console.error("❌ Get available mock tests error:", error.message);
@@ -215,7 +219,7 @@ export const getMockTest = async (
   try {
     const { id: testId } = request.params as { id: string };
     console.log("🔍 Fetching mock test with ID:", testId);
-    
+
     // Get mock test with populated questions
     const mockTest = await MockTest.findById(testId).populate({
       path: "questions",
@@ -237,19 +241,19 @@ export const getMockTest = async (
         },
       ],
     });
-    
+
     if (!mockTest) {
       console.log("❌ Mock test not found");
       return reply.status(404).send({ error: "Mock test not found" });
     }
-    
+
     console.log("✅ Mock test found:", {
       title: mockTest.title,
       questionsCount: mockTest.questions?.length || 0,
       duration: mockTest.duration,
       totalMarks: mockTest.totalMarks
     });
-    
+
     // Transform the response to match frontend expectations
     const mockTestObj = mockTest.toObject();
     if (mockTestObj.questions) {
@@ -260,7 +264,7 @@ export const getMockTest = async (
         level: question.level_id,
       }));
     }
-    
+
     reply.send(mockTestObj);
   } catch (error: any) {
     console.error("❌ Get mock test error:", error.message);
@@ -274,16 +278,16 @@ export const submitMockTest = async (request: TestRequest, reply: FastifyReply) 
     console.log("🚀 Starting test submission...");
     const { id: testId } = request.params as { id: string };
     const { answers } = request.body as { answers: Array<{ questionId: string; selectedOption: number }> };
-    
+
     console.log("📝 Test ID:", testId);
     console.log("📝 Answers received:", answers?.length || 0);
-    
+
     let userId = (request as any).user?.id;
     if (!userId) {
       const user = await User.findOne({ email: "daniel@inovitrix.com" });
       userId = user?._id;
     }
-    
+
     console.log("👤 User ID:", userId);
 
     // Get mock test details with populated questions
@@ -312,15 +316,15 @@ export const submitMockTest = async (request: TestRequest, reply: FastifyReply) 
     for (const question of questions) {
       const q = question as any; // Type assertion for populated question
       const userAnswer = answers.find(a => a.questionId === q._id.toString());
-      
+
       // Find the correct answer from options
       let correctAnswerIndex = -1;
       if (q.options) {
         correctAnswerIndex = q.options.findIndex((opt: any) => opt.isCorrect === true);
       }
-      
+
       const isCorrect = userAnswer && userAnswer.selectedOption === correctAnswerIndex;
-      
+
       if (userAnswer) {
         if (isCorrect) {
           correctAnswers++;
@@ -353,16 +357,16 @@ export const submitMockTest = async (request: TestRequest, reply: FastifyReply) 
     let existingResults;
     if (packageId) {
       // For package-specific submissions, only count attempts with this package
-      existingResults = await Result.find({ 
-        student: userId, 
-        mockTest: testId, 
-        package: packageId 
+      existingResults = await Result.find({
+        student: userId,
+        mockTest: testId,
+        package: packageId
       });
     } else {
       // For non-package submissions, count all attempts
-      existingResults = await Result.find({ 
-        student: userId, 
-        mockTest: testId 
+      existingResults = await Result.find({
+        student: userId,
+        mockTest: testId
       });
     }
     const attemptNumber = existingResults.length + 1;
@@ -378,7 +382,7 @@ export const submitMockTest = async (request: TestRequest, reply: FastifyReply) 
       totalMarks,
       isPassed
     });
-    
+
     const result = new Result({
       student: userId,
       mockTest: testId,
@@ -424,7 +428,7 @@ export const submitMockTest = async (request: TestRequest, reply: FastifyReply) 
 export const getStudentResults = async (request: TestRequest, reply: FastifyReply) => {
   try {
     const { packageId } = request.query as { packageId?: string };
-    
+
     let userId = (request as any).user?.id;
     if (!userId) {
       const user = await User.findOne({ email: "daniel@inovitrix.com" });
@@ -451,7 +455,7 @@ export const getDetailedTestResult = async (request: TestRequest, reply: Fastify
   try {
     const { id: testId } = request.params as { id: string };
     const { packageId } = request.query as { packageId?: string };
-    
+
     let userId = (request as any).user?.id;
     if (!userId) {
       const user = await User.findOne({ email: "daniel@inovitrix.com" });
@@ -464,9 +468,9 @@ export const getDetailedTestResult = async (request: TestRequest, reply: Fastify
     }
 
     const results = await Result.find(query)
-    .populate('mockTest', 'title description duration totalMarks')
-    .populate('answers.question', 'question options correctAnswer')
-    .sort({ attemptNumber: -1 });
+      .populate('mockTest', 'title description duration totalMarks')
+      .populate('answers.question', 'question options correctAnswer')
+      .sort({ attemptNumber: -1 });
 
     if (!results.length) {
       return reply.status(404).send({ error: "Results not found" });
@@ -483,7 +487,7 @@ export const checkTestAttemptEligibility = async (request: TestRequest, reply: F
   try {
     const { id: testId } = request.params as { id: string };
     const { packageId } = request.query as { packageId?: string };
-    
+
     let userId = (request as any).user?.id;
     if (!userId) {
       const user = await User.findOne({ email: "daniel@inovitrix.com" });
@@ -500,16 +504,16 @@ export const checkTestAttemptEligibility = async (request: TestRequest, reply: F
     let existingAttempts;
     if (packageId) {
       // For package-specific requests, only count attempts with this package
-      existingAttempts = await Result.find({ 
-        student: userId, 
-        mockTest: testId, 
-        package: packageId 
+      existingAttempts = await Result.find({
+        student: userId,
+        mockTest: testId,
+        package: packageId
       });
     } else {
       // For non-package requests, count all attempts
-      existingAttempts = await Result.find({ 
-        student: userId, 
-        mockTest: testId 
+      existingAttempts = await Result.find({
+        student: userId,
+        mockTest: testId
       });
     }
     const maxAttempts = mockTest.numberOfAttempts || 1;
@@ -549,4 +553,100 @@ export const debugPackageMockTests = async (request: TestRequest, reply: Fastify
 
 export const assignMockTestsToPackages = async (request: TestRequest, reply: FastifyReply) => {
   reply.status(501).send({ error: "Not implemented" });
+};
+
+// Get specific detailed result for a student (reuses structure from admin view)
+export const getStudentResultDetail = async (
+  request: TestRequest,
+  reply: FastifyReply
+) => {
+  try {
+    const { id: resultId } = request.params as { id: string };
+
+    let userId = (request as any).user?.id;
+    if (!userId) {
+      const user = await User.findOne({ email: "daniel@inovitrix.com" });
+      userId = user?._id;
+    }
+
+    // Find result and ensure it belongs to the student
+    const result = await Result.findOne({ _id: resultId, student: userId })
+      .populate("student", "fullname email userType")
+      .populate(
+        "mockTest",
+        "title description totalMarks passingMarks duration"
+      )
+      .populate({
+        path: "answers.question",
+        populate: [
+          { path: "category_id", select: "name" },
+          { path: "subject_id", select: "name" },
+          { path: "level_id", select: "name" },
+        ],
+      });
+
+    if (!result) {
+      return reply.status(404).send({ message: "Result not found" });
+    }
+
+    // Transform the result for student view with complete data (Same as Admin)
+    const detailedResult = {
+      _id: result._id,
+      testId: result.mockTest._id,
+      testTitle: (result.mockTest as any).title,
+      testDescription: (result.mockTest as any).description,
+      testDuration: (result.mockTest as any).duration,
+      score: result.score,
+      totalMarks: result.totalMarks,
+      passingMarks: (result.mockTest as any).passingMarks,
+      percentage: result.percentage,
+      correctAnswers: result.correctAnswers,
+      incorrectAnswers: result.incorrectAnswers,
+      unansweredQuestions: result.unansweredQuestions,
+      totalQuestions:
+        result.correctAnswers +
+        result.incorrectAnswers +
+        result.unansweredQuestions,
+      timeTaken: result.timeTaken,
+      timeAllowed: (result.mockTest as any).duration * 60,
+      isPassed: result.isPassed,
+      attemptNumber: result.attemptNumber,
+      submissionType: result.submissionType,
+      completedAt: result.createdAt,
+      student: {
+        _id: result.student._id,
+        fullname: (result.student as any).fullname,
+        email: (result.student as any).email,
+        userType: (result.student as any).userType,
+      },
+      mockTest: {
+        _id: result.mockTest._id,
+        title: (result.mockTest as any).title,
+        description: (result.mockTest as any).description,
+        totalMarks: (result.mockTest as any).totalMarks,
+        passingMarks: (result.mockTest as any).passingMarks,
+        duration: (result.mockTest as any).duration,
+      },
+      detailedAnalysis: result.detailedAnalysis,
+      questionWiseAnalysis: result.answers.map((answer: any) => ({
+        questionId: answer.question._id,
+        questionText: answer.question.text,
+        options: answer.question.options,
+        userAnswer: answer.answer || answer.selectedAnswer,
+        correctAnswer: answer.question.correctAnswer,
+        isCorrect: answer.isCorrect,
+        marks: answer.marks,
+        timeTaken: answer.timeTaken || 0,
+        difficulty: answer.question.difficulty,
+        subject: answer.question.subject_id?.name || "General",
+        category: answer.question.category_id?.name || "General",
+        explanation: answer.question.explanation || "",
+      })),
+    };
+
+    reply.send(detailedResult);
+  } catch (error) {
+    console.error("Error fetching detailed result for student:", error);
+    reply.status(500).send({ message: "Error fetching result details", error });
+  }
 };

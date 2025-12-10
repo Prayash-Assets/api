@@ -342,7 +342,7 @@ export async function login(request: FastifyRequest, reply: FastifyReply) {
 
     // Generate session ID for single device login
     const sessionId = randomUUID();
-    
+
     // Update user's active session
     user.activeSessionId = sessionId;
     await user.save();
@@ -400,7 +400,7 @@ export async function login(request: FastifyRequest, reply: FastifyReply) {
 export async function logout(request: FastifyRequest, reply: FastifyReply) {
   try {
     const userId = (request as any).user?.id;
-    
+
     if (userId) {
       // Clear active session ID
       const user = await User.findById(userId);
@@ -410,7 +410,7 @@ export async function logout(request: FastifyRequest, reply: FastifyReply) {
         logger.info("User session cleared", { userId });
       }
     }
-    
+
     logger.info("Logout attempt");
     reply.send({ message: "Logout successful" });
     logger.info("User logged out successfully");
@@ -638,9 +638,18 @@ export async function requestPasswordReset(
       { expiresIn: "1h" }
     );
 
-    // In a real application, you would send this token via email
-    // For now, we'll just log it or return it (remove in production)
-    logger.info("Password reset requested", { userId: user.id, resetToken });
+    // Send password reset email
+    const emailSent = await emailService.sendPasswordResetEmail(
+      user.email,
+      user.fullname,
+      resetToken
+    );
+
+    if (emailSent) {
+      logger.info("Password reset email sent", { userId: user.id, email: user.email });
+    } else {
+      logger.error("Failed to send password reset email", { userId: user.id, email: user.email });
+    }
 
     reply.send({
       message: "If the email exists, a reset link has been sent",
@@ -720,7 +729,7 @@ export async function verifyToken(
 
     const token = authHeader.substring(7);
     const decoded = jwt.verify(token, process.env.JWT_SECRET || "your-secret-key") as any;
-    
+
     const user = await User.findById(decoded.id).populate("roles").select("-password");
     if (!user) {
       return reply.status(404).send({ error: "User not found" });
@@ -838,17 +847,17 @@ export async function validateSession(
     const sessionId = request.headers['x-session-id'] as string;
 
     if (!userId || !sessionId) {
-      return reply.status(401).send({ 
-        valid: false, 
-        message: "Missing user ID or session ID" 
+      return reply.status(401).send({
+        valid: false,
+        message: "Missing user ID or session ID"
       });
     }
 
     const user = await User.findById(userId);
     if (!user) {
-      return reply.status(404).send({ 
-        valid: false, 
-        message: "User not found" 
+      return reply.status(404).send({
+        valid: false,
+        message: "User not found"
       });
     }
 
@@ -859,25 +868,25 @@ export async function validateSession(
         activeSession: user.activeSessionId,
         requestSession: sessionId
       });
-      
-      return reply.status(403).send({ 
-        valid: false, 
-        message: "Session invalid - logged in from another device" 
+
+      return reply.status(403).send({
+        valid: false,
+        message: "Session invalid - logged in from another device"
       });
     }
 
-    reply.send({ 
-      valid: true, 
-      message: "Session is valid" 
+    reply.send({
+      valid: true,
+      message: "Session is valid"
     });
   } catch (err: any) {
     logger.error("Validate session error", {
       error: err.message,
       stack: err.stack,
     });
-    reply.status(500).send({ 
-      valid: false, 
-      message: "Internal Server Error" 
+    reply.status(500).send({
+      valid: false,
+      message: "Internal Server Error"
     });
   }
 }

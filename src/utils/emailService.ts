@@ -13,7 +13,7 @@ class EmailService {
   private static instance: EmailService;
   private transporter: nodemailer.Transporter | null = null;
 
-  private constructor() {}
+  private constructor() { }
 
   public static getInstance(): EmailService {
     if (!EmailService.instance) {
@@ -229,6 +229,92 @@ class EmailService {
       ⚠️ This code will expire in 10 minutes for security reasons.
       
       If you didn't create an account with us, please ignore this email.
+      
+      Best regards,
+      The Prayash App Team
+    `;
+
+    return await this.sendEmail({
+      to: email,
+      subject,
+      html,
+      text,
+    });
+  }
+
+  public async sendPasswordResetEmail(
+    email: string,
+    fullname: string,
+    resetToken: string
+  ): Promise<boolean> {
+    const frontendUrl = process.env.FRONTEND_URL || "http://localhost:3000";
+    const resetLink = `${frontendUrl}/reset-password?token=${resetToken}`;
+
+    const subject = "Password Reset Request - Prayash App";
+    const html = `
+      <!DOCTYPE html>
+      <html>
+      <head>
+        <meta charset="utf-8">
+        <meta name="viewport" content="width=device-width, initial-scale=1.0">
+        <title>Reset Password</title>
+        <style>
+          body { font-family: Arial, sans-serif; line-height: 1.6; color: #333; }
+          .container { max-width: 600px; margin: 0 auto; padding: 20px; }
+          .header { background-color: #3B82F6; color: white; padding: 20px; text-align: center; }
+          .content { padding: 20px; background-color: #f9f9f9; }
+          .button { display: inline-block; padding: 12px 24px; background-color: #3B82F6; color: white; 
+                    text-decoration: none; border-radius: 4px; font-weight: bold; margin: 20px 0; }
+          .footer { padding: 20px; text-align: center; color: #666; font-size: 12px; }
+          .warning { color: #ff6b6b; font-weight: bold; }
+        </style>
+      </head>
+      <body>
+        <div class="container">
+          <div class="header">
+            <h1>Password Reset Request</h1>
+          </div>
+          <div class="content">
+            <h2>Hello ${fullname},</h2>
+            <p>We received a request to reset your password for your Prayash App account.</p>
+            
+            <p>Click the button below to set a new password:</p>
+            
+            <div style="text-align: center;">
+              <a href="${resetLink}" class="button">Reset Password</a>
+            </div>
+            
+            <p>If the button doesn't work, you can verify by copying and pasting the following link in your browser:</p>
+            <p><a href="${resetLink}">${resetLink}</a></p>
+            
+            <p class="warning">⚠️ This link will expire in 1 hour.</p>
+            
+            <p>If you didn't request a password reset, please ignore this email. Your password will remain unchanged.</p>
+            
+            <p>Best regards,<br>The Prayash App Team</p>
+          </div>
+          <div class="footer">
+            <p>This is an automated email. Please do not reply to this message.</p>
+          </div>
+        </div>
+      </body>
+      </html>
+    `;
+
+    const text = `
+      Password Reset Request
+      
+      Hello ${fullname},
+      
+      We received a request to reset your password for your Prayash App account.
+      
+      Copy and paste the following link in your browser to set a new password:
+      
+      ${resetLink}
+      
+      ⚠️ This link will expire in 1 hour.
+      
+      If you didn't request a password reset, please ignore this email.
       
       Best regards,
       The Prayash App Team

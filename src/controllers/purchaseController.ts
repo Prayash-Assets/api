@@ -37,7 +37,7 @@ export const createOrder = async (
     const userId = (req as any).user.id;
 
     if (!process.env.RAZORPAY_KEY_ID || !process.env.RAZORPAY_KEY_SECRET) {
-      return reply.status(500).send({ 
+      return reply.status(500).send({
         message: "Payment gateway not configured. Please contact support.",
         error: "PAYMENT_GATEWAY_NOT_CONFIGURED"
       });
@@ -196,20 +196,20 @@ export const verifyPayment = async (
 
     // Get userId from purchase record instead of auth middleware
     let purchase = await Purchase.findById(purchaseId);
-    
+
     // Fallback: try to find by razorpay_order_id if purchaseId lookup fails
     if (!purchase) {
       purchase = await Purchase.findOne({ razorpayOrderId: razorpay_order_id });
     }
-    
+
     if (!purchase) {
       return reply.status(404).send({ message: "Purchase record not found" });
     }
-    
+
     const userId = (purchase.user as any).toString();
 
     if (!process.env.RAZORPAY_KEY_SECRET) {
-      return reply.status(500).send({ 
+      return reply.status(500).send({
         message: "Payment gateway not configured. Please contact support.",
         error: "PAYMENT_GATEWAY_NOT_CONFIGURED"
       });
@@ -251,13 +251,13 @@ export const verifyPayment = async (
         let captureResult = null;
         if (payment.status === 'authorized' && !payment.captured) {
           console.log("Payment authorized but not captured. Capturing now...");
-          
+
           captureResult = await razorpay.payments.capture(
             razorpay_payment_id,
             payment.amount,
             'INR'
           );
-          
+
           console.log("Manual capture result:", captureResult);
         } else if (payment.status === 'captured') {
           console.log("Payment already captured by auto-capture");
@@ -266,22 +266,22 @@ export const verifyPayment = async (
         // Step 3: Update purchase record based on final payment status
         purchaseWithPackage.razorpayPaymentId = razorpay_payment_id;
         purchaseWithPackage.razorpaySignature = razorpay_signature;
-        
+
         // Set status based on actual payment state
-        const isCaptured = payment.captured || payment.status === 'captured' || 
-                          (captureResult && captureResult.captured);
-        
+        const isCaptured = payment.captured || payment.status === 'captured' ||
+          (captureResult && captureResult.captured);
+
         if (isCaptured) {
           purchaseWithPackage.status = "captured";
           console.log("✅ Payment captured successfully");
-          
+
           // Add package to student only after successful capture
           console.log("📚 About to add package to student:", {
             userId,
             packageId: (purchaseWithPackage.package as any)._id,
             userType: "will check in function"
           });
-          
+
           try {
             await addPackageToStudent(userId, (purchaseWithPackage.package as any)._id);
             console.log("✅ Package assignment completed successfully");
@@ -295,7 +295,7 @@ export const verifyPayment = async (
           purchaseWithPackage.status = "failed";
           console.log("❌ Payment in unexpected status:", payment.status);
         }
-        
+
         await purchaseWithPackage.save();
 
         reply.status(200).send({
@@ -308,7 +308,7 @@ export const verifyPayment = async (
 
       } catch (paymentError: any) {
         console.error("Error processing payment:", paymentError);
-        
+
         // Update purchase as failed
         purchaseWithPackage.razorpayPaymentId = razorpay_payment_id;
         purchaseWithPackage.razorpaySignature = razorpay_signature;
@@ -316,8 +316,8 @@ export const verifyPayment = async (
         purchaseWithPackage.failureReason = paymentError.message || "Payment processing failed";
         await purchaseWithPackage.save();
 
-        reply.status(400).send({ 
-          message: "Payment processing failed", 
+        reply.status(400).send({
+          message: "Payment processing failed",
           error: paymentError.message,
           purchase: purchaseWithPackage
         });
@@ -338,7 +338,7 @@ export const verifyPayment = async (
 const addPackageToStudent = async (userId: string, packageId: string) => {
   try {
     console.log(`🔍 Starting addPackageToStudent - userId: ${userId}, packageId: ${packageId}`);
-    
+
     // First check if user exists and get their type
     const user = await User.findById(userId);
     if (!user) {
@@ -355,36 +355,36 @@ const addPackageToStudent = async (userId: string, packageId: string) => {
     }
 
     console.log(`📝 Attempting to add package ${packageId} to student ${userId}`);
-    
+
     // Use MongoDB update operation to add package (handles duplicates automatically)
     const updateResult = await User.updateOne(
       { _id: userId, userType: 'Student' },
       { $addToSet: { packages: packageId } }
     );
-    
+
     console.log(`📝 MongoDB update result:`, {
       acknowledged: updateResult.acknowledged,
       matchedCount: updateResult.matchedCount,
       modifiedCount: updateResult.modifiedCount,
       upsertedCount: updateResult.upsertedCount
     });
-    
+
     if (updateResult.matchedCount === 0) {
       console.error(`❌ No student user found with ID ${userId}`);
       throw new Error("Student user not found for package assignment");
     }
-    
+
     if (updateResult.modifiedCount > 0) {
       console.log(`✅ Package ${packageId} successfully added to student ${userId}`);
     } else {
       console.log(`ℹ️ Package ${packageId} already exists for student ${userId}`);
     }
-    
+
     // Verify the update
     const verifyUser = await User.findById(userId);
     const packageCount = (verifyUser as any)?.packages?.length || 0;
     const hasPackage = (verifyUser as any)?.packages?.includes(packageId);
-    
+
     console.log(`🔍 Final verification:`, {
       userId,
       packageId,
@@ -392,7 +392,7 @@ const addPackageToStudent = async (userId: string, packageId: string) => {
       hasThisPackage: hasPackage,
       userType: verifyUser?.userType
     });
-    
+
   } catch (error) {
     console.error("❌ Error in addPackageToStudent:", error);
     throw error;
@@ -672,7 +672,7 @@ export const generateReceipt = async (
       .fillColor(white)
       .fontSize(24) // Reduced from 28
       .font("Helvetica-Bold")
-      .text("Prayas Assets", 50, 40);
+      .text("Prayash Assets", 50, 40);
 
     doc
       .fontSize(12) // Reduced from 14
@@ -901,8 +901,7 @@ export const generateReceipt = async (
     reply.header("Content-Type", "application/pdf");
     reply.header(
       "Content-Disposition",
-      `attachment; filename="receipt-${
-        purchase.razorpayPaymentId || "receipt"
+      `attachment; filename="receipt-${purchase.razorpayPaymentId || "receipt"
       }.pdf"`
     );
     reply.header("Content-Length", pdfBuffer.length.toString());
@@ -949,11 +948,11 @@ export const capturePayment = async (
 
     // Fetch payment details
     const payment = await razorpay.payments.fetch(purchase.razorpayPaymentId);
-    
+
     if (payment.status !== 'authorized') {
-      return reply.status(400).send({ 
-        message: "Payment is not in authorized state", 
-        currentStatus: payment.status 
+      return reply.status(400).send({
+        message: "Payment is not in authorized state",
+        currentStatus: payment.status
       });
     }
 
@@ -1096,7 +1095,7 @@ export const viewReceipt = async (
       .fillColor(white)
       .fontSize(24) // Reduced from 28
       .font("Helvetica-Bold")
-      .text("Prayas Assets", 50, 40);
+      .text("Prayash Assets", 50, 40);
 
     doc
       .fontSize(12) // Reduced from 14
@@ -1324,8 +1323,7 @@ export const viewReceipt = async (
     reply.header("Content-Type", "application/pdf");
     reply.header(
       "Content-Disposition",
-      `inline; filename="receipt-${
-        purchase.razorpayPaymentId || "receipt"
+      `inline; filename="receipt-${purchase.razorpayPaymentId || "receipt"
       }.pdf"`
     );
     reply.header("Content-Length", pdfBuffer.length.toString());
