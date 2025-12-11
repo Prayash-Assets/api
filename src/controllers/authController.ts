@@ -53,7 +53,8 @@ const resetPasswordRequestSchema = Joi.object({
 });
 
 const resetPasswordSchema = Joi.object({
-  token: Joi.string().required(),
+  email: Joi.string().email().required(),
+  resetCode: Joi.string().length(6).required(),
   newPassword: Joi.string().min(6).required(),
 });
 
@@ -609,7 +610,7 @@ export async function refreshToken(
 }
 
 /**
- * Request password reset (send reset token)
+ * Request password reset (send reset code)
  */
 export async function requestPasswordReset(
   request: FastifyRequest,
@@ -627,22 +628,23 @@ export async function requestPasswordReset(
     if (!user) {
       // Don't reveal if user exists or not
       return reply.send({
-        message: "If the email exists, a reset link has been sent",
+        message: "If the email exists, a reset code has been sent",
       });
     }
 
-    // Generate reset token (expires in 1 hour)
-    const resetToken = jwt.sign(
-      { id: user.id, purpose: "password_reset" },
-      process.env.JWT_SECRET || "your-secret-key",
-      { expiresIn: "1h" }
-    );
+    // Generate reset code
+    const resetCode = generateVerificationCode();
+
+    // Set expiry to 10 minutes
+    user.passwordResetCode = resetCode;
+    user.passwordResetExpiry = new Date(Date.now() + 10 * 60 * 1000);
+    await user.save();
 
     // Send password reset email
     const emailSent = await emailService.sendPasswordResetEmail(
       user.email,
       user.fullname,
-      resetToken
+      resetCode
     );
 
     if (emailSent) {
@@ -652,10 +654,7 @@ export async function requestPasswordReset(
     }
 
     reply.send({
-      message: "If the email exists, a reset link has been sent",
-      // Remove this in production - only for development
-      resetToken:
-        process.env.NODE_ENV === "development" ? resetToken : undefined,
+      message: "If the email exists, a reset code has been sent",
     });
   } catch (err: any) {
     logger.error("Request password reset error", {
@@ -667,7 +666,7 @@ export async function requestPasswordReset(
 }
 
 /**
- * Reset password using reset token
+ * Reset password using reset code
  */
 export async function resetPassword(
   request: FastifyRequest,
@@ -679,28 +678,31 @@ export async function resetPassword(
       return reply.status(400).send({ error: error.details[0].message });
     }
 
-    const { token, newPassword } = value;
+    const { email, resetCode, newPassword } = value;
 
-    let decoded: any;
-    try {
-      decoded = jwt.verify(token, process.env.JWT_SECRET || "your-secret-key");
-      if (decoded.purpose !== "password_reset") {
-        throw new Error("Invalid token purpose");
-      }
-    } catch (jwtError) {
-      return reply
-        .status(400)
-        .send({ error: "Invalid or expired reset token" });
-    }
-
-    const user = await User.findById(decoded.id);
+    const user = await User.findOne({ email });
     if (!user) {
       return reply.status(404).send({ error: "User not found" });
+    }
+
+    // Check if reset code matches
+    if (user.passwordResetCode !== resetCode) {
+      return reply.status(400).send({ error: "Invalid reset code" });
+    }
+
+    // Check if code has expired
+    if (!user.passwordResetExpiry || new Date() > user.passwordResetExpiry) {
+      return reply.status(400).send({ error: "Reset code has expired. Please request a new one." });
     }
 
     // Hash new password
     const hashedPassword = await bcrypt.hash(newPassword, 10);
     user.password = hashedPassword;
+
+    // Clear reset fields
+    user.passwordResetCode = undefined;
+    user.passwordResetExpiry = undefined;
+
     await user.save();
 
     logger.info("Password reset completed", { userId: user.id });

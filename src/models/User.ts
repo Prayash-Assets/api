@@ -20,6 +20,9 @@ export interface IUser extends Document {
   activeSessionId?: string;
   createdAt: Date;
   updatedAt: Date;
+  // Password reset fields
+  passwordResetCode?: string;
+  passwordResetExpiry?: Date;
 }
 
 // Student interface extending base User
@@ -95,6 +98,15 @@ const baseUserSchema: Schema = new mongoose.Schema(
     activeSessionId: {
       type: String,
       sparse: true, // Allows for null values
+    },
+    // Password reset fields
+    passwordResetCode: {
+      type: String,
+      sparse: true,
+    },
+    passwordResetExpiry: {
+      type: Date,
+      sparse: true,
     },
   },
   {

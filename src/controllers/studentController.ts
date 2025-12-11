@@ -103,7 +103,8 @@ export const getPurchasedPackages = async (
         price: pkg.price,
         originalPrice: pkg.originalPrice,
         discountPercentage: pkg.discountPercentage,
-        duration: validityDays,
+        validityDays: validityDays,
+        duration: validityDays, // Keep compatibility
         mockTests: pkg.mockTests || [],
         files: pkg.files || [],
         links: pkg.links || [],

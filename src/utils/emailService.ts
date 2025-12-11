@@ -245,12 +245,9 @@ class EmailService {
   public async sendPasswordResetEmail(
     email: string,
     fullname: string,
-    resetToken: string
+    resetCode: string
   ): Promise<boolean> {
-    const frontendUrl = process.env.FRONTEND_URL || "http://localhost:3000";
-    const resetLink = `${frontendUrl}/reset-password?token=${resetToken}`;
-
-    const subject = "Password Reset Request - Prayash App";
+    const subject = "Password Reset Code - Prayash App";
     const html = `
       <!DOCTYPE html>
       <html>
@@ -263,8 +260,8 @@ class EmailService {
           .container { max-width: 600px; margin: 0 auto; padding: 20px; }
           .header { background-color: #3B82F6; color: white; padding: 20px; text-align: center; }
           .content { padding: 20px; background-color: #f9f9f9; }
-          .button { display: inline-block; padding: 12px 24px; background-color: #3B82F6; color: white; 
-                    text-decoration: none; border-radius: 4px; font-weight: bold; margin: 20px 0; }
+          .code { font-size: 24px; font-weight: bold; color: #3B82F6; text-align: center; 
+                  padding: 20px; background-color: white; border: 2px dashed #3B82F6; margin: 20px 0; }
           .footer { padding: 20px; text-align: center; color: #666; font-size: 12px; }
           .warning { color: #ff6b6b; font-weight: bold; }
         </style>
@@ -278,16 +275,11 @@ class EmailService {
             <h2>Hello ${fullname},</h2>
             <p>We received a request to reset your password for your Prayash App account.</p>
             
-            <p>Click the button below to set a new password:</p>
+            <p>Use the following 6-digit code to reset your password:</p>
             
-            <div style="text-align: center;">
-              <a href="${resetLink}" class="button">Reset Password</a>
-            </div>
+            <div class="code">${resetCode}</div>
             
-            <p>If the button doesn't work, you can verify by copying and pasting the following link in your browser:</p>
-            <p><a href="${resetLink}">${resetLink}</a></p>
-            
-            <p class="warning">⚠️ This link will expire in 1 hour.</p>
+            <p class="warning">⚠️ This code will expire in 10 minutes.</p>
             
             <p>If you didn't request a password reset, please ignore this email. Your password will remain unchanged.</p>
             
@@ -308,11 +300,11 @@ class EmailService {
       
       We received a request to reset your password for your Prayash App account.
       
-      Copy and paste the following link in your browser to set a new password:
+      Use the following 6-digit code to reset your password:
       
-      ${resetLink}
+      Code: ${resetCode}
       
-      ⚠️ This link will expire in 1 hour.
+      ⚠️ This code will expire in 10 minutes.
       
       If you didn't request a password reset, please ignore this email.
       
