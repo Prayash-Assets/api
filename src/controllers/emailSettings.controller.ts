@@ -23,7 +23,7 @@ export const getEmailSettings = async (
 ) => {
   try {
     const settings = await EmailSettings.findOne({ isActive: true })
-      .select("-__v -createdAt -updatedAt -smtpPassword")
+      .select("-__v -createdAt -updatedAt +smtpPassword")
       .lean();
 
     if (!settings) {

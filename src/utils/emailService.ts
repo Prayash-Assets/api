@@ -2,11 +2,18 @@ import nodemailer from "nodemailer";
 import EmailSettings from "../models/emailSettings.model";
 import logger from "../config/logger";
 
+export interface EmailAttachment {
+  filename: string;
+  content: Buffer;
+  contentType: string;
+}
+
 export interface EmailOptions {
   to: string;
   subject: string;
   html: string;
   text?: string;
+  attachments?: EmailAttachment[];
 }
 
 class EmailService {
@@ -135,13 +142,22 @@ class EmailService {
         return false;
       }
 
-      const mailOptions = {
+      const mailOptions: any = {
         from: `${emailSettings.fromName} <${emailSettings.fromEmail}>`,
         to: options.to,
         subject: options.subject,
         html: options.html,
         text: options.text,
       };
+
+      // Add attachments if provided
+      if (options.attachments && options.attachments.length > 0) {
+        mailOptions.attachments = options.attachments.map(att => ({
+          filename: att.filename,
+          content: att.content,
+          contentType: att.contentType,
+        }));
+      }
 
       const result = await this.transporter.sendMail(mailOptions);
       logger.info("Email sent successfully", {
@@ -169,7 +185,7 @@ class EmailService {
     fullname: string,
     verificationCode: string
   ): Promise<boolean> {
-    const subject = "Email Verification - Prayash App";
+    const subject = "Email Verification - Prayash Assets";
     const html = `
       <!DOCTYPE html>
       <html>
@@ -191,11 +207,11 @@ class EmailService {
       <body>
         <div class="container">
           <div class="header">
-            <h1>Welcome to Prayash App!</h1>
+            <h1>Welcome to Prayash Assets!</h1>
           </div>
           <div class="content">
             <h2>Hello ${fullname},</h2>
-            <p>Thank you for registering with Prayash App. To complete your registration, please verify your email address using the verification code below:</p>
+            <p>Thank you for registering with Prayash Assets. To complete your registration, please verify your email address using the verification code below:</p>
             
             <div class="code">${verificationCode}</div>
             
@@ -205,7 +221,7 @@ class EmailService {
             
             <p>If you didn't create an account with us, please ignore this email.</p>
             
-            <p>Best regards,<br>The Prayash App Team</p>
+            <p>Best regards,<br>The Prayash Assets Team</p>
           </div>
           <div class="footer">
             <p>This is an automated email. Please do not reply to this message.</p>
@@ -216,11 +232,11 @@ class EmailService {
     `;
 
     const text = `
-      Welcome to Prayash App!
+      Welcome to Prayash Assets!
       
       Hello ${fullname},
       
-      Thank you for registering with Prayash App. To complete your registration, please verify your email address using the verification code below:
+      Thank you for registering with Prayash Assets. To complete your registration, please verify your email address using the verification code below:
       
       Verification Code: ${verificationCode}
       
@@ -231,7 +247,7 @@ class EmailService {
       If you didn't create an account with us, please ignore this email.
       
       Best regards,
-      The Prayash App Team
+      The Prayash Assets Team
     `;
 
     return await this.sendEmail({
@@ -247,7 +263,7 @@ class EmailService {
     fullname: string,
     resetCode: string
   ): Promise<boolean> {
-    const subject = "Password Reset Code - Prayash App";
+    const subject = "Password Reset Code - Prayash Assets";
     const html = `
       <!DOCTYPE html>
       <html>
@@ -273,7 +289,7 @@ class EmailService {
           </div>
           <div class="content">
             <h2>Hello ${fullname},</h2>
-            <p>We received a request to reset your password for your Prayash App account.</p>
+            <p>We received a request to reset your password for your Prayash Assets account.</p>
             
             <p>Use the following 6-digit code to reset your password:</p>
             
@@ -283,7 +299,7 @@ class EmailService {
             
             <p>If you didn't request a password reset, please ignore this email. Your password will remain unchanged.</p>
             
-            <p>Best regards,<br>The Prayash App Team</p>
+            <p>Best regards,<br>The Prayash Assets Team</p>
           </div>
           <div class="footer">
             <p>This is an automated email. Please do not reply to this message.</p>
@@ -298,7 +314,7 @@ class EmailService {
       
       Hello ${fullname},
       
-      We received a request to reset your password for your Prayash App account.
+      We received a request to reset your password for your Prayash Assets account.
       
       Use the following 6-digit code to reset your password:
       
@@ -309,7 +325,7 @@ class EmailService {
       If you didn't request a password reset, please ignore this email.
       
       Best regards,
-      The Prayash App Team
+      The Prayash Assets Team
     `;
 
     return await this.sendEmail({
@@ -317,6 +333,125 @@ class EmailService {
       subject,
       html,
       text,
+    });
+  }
+
+  public async sendPurchaseInvoice(
+    email: string,
+    fullname: string,
+    packageName: string,
+    amount: number,
+    paymentId: string,
+    invoicePdf: Buffer
+  ): Promise<boolean> {
+    const subject = "Purchase Confirmation & Invoice - Prayash Assets";
+    const html = `
+      <!DOCTYPE html>
+      <html>
+      <head>
+        <meta charset="utf-8">
+        <meta name="viewport" content="width=device-width, initial-scale=1.0">
+        <title>Purchase Confirmation</title>
+        <style>
+          body { font-family: Arial, sans-serif; line-height: 1.6; color: #333; }
+          .container { max-width: 600px; margin: 0 auto; padding: 20px; }
+          .header { background-color: #22C55E; color: white; padding: 20px; text-align: center; }
+          .content { padding: 20px; background-color: #f9f9f9; }
+          .details { background-color: white; padding: 20px; border-radius: 8px; margin: 20px 0; border: 1px solid #e5e7eb; }
+          .details-row { display: flex; justify-content: space-between; padding: 10px 0; border-bottom: 1px solid #f3f4f6; }
+          .details-row:last-child { border-bottom: none; }
+          .amount { font-size: 24px; font-weight: bold; color: #22C55E; text-align: center; 
+                    padding: 20px; background-color: #f0fdf4; border-radius: 8px; margin: 20px 0; }
+          .footer { padding: 20px; text-align: center; color: #666; font-size: 12px; }
+          .success-icon { font-size: 48px; margin-bottom: 10px; }
+        </style>
+      </head>
+      <body>
+        <div class="container">
+          <div class="header">
+            <div class="success-icon">✓</div>
+            <h1>Payment Successful!</h1>
+          </div>
+          <div class="content">
+            <h2>Hello ${fullname},</h2>
+            <p>Thank you for your purchase! Your payment has been successfully processed.</p>
+            
+            <div class="details">
+              <h3 style="margin-top: 0; color: #3B82F6;">Purchase Details</h3>
+              <div class="details-row">
+                <span>Package:</span>
+                <strong>${packageName}</strong>
+              </div>
+              <div class="details-row">
+                <span>Payment ID:</span>
+                <strong>${paymentId}</strong>
+              </div>
+              <div class="details-row">
+                <span>Date:</span>
+                <strong>${new Date().toLocaleDateString('en-IN', {
+      year: 'numeric',
+      month: 'long',
+      day: 'numeric',
+      hour: '2-digit',
+      minute: '2-digit'
+    })}</strong>
+              </div>
+            </div>
+            
+            <div class="amount">
+              Amount Paid: ₹${amount.toFixed(2)}
+            </div>
+            
+            <p><strong>📎 Your invoice is attached to this email as a PDF.</strong></p>
+            
+            <p>You can now access your purchased package by logging into your account at Prayash Assets.</p>
+            
+            <p>If you have any questions about your purchase, please don't hesitate to contact us.</p>
+            
+            <p>Best regards,<br>The Prayash Assets Team</p>
+          </div>
+          <div class="footer">
+            <p>This is an automated email. Please do not reply to this message.</p>
+            <p>For support, contact us at support@prayashassets.com</p>
+          </div>
+        </div>
+      </body>
+      </html>
+    `;
+
+    const text = `
+      Payment Successful!
+      
+      Hello ${fullname},
+      
+      Thank you for your purchase! Your payment has been successfully processed.
+      
+      Purchase Details:
+      - Package: ${packageName}
+      - Payment ID: ${paymentId}
+      - Amount Paid: ₹${amount.toFixed(2)}
+      - Date: ${new Date().toLocaleDateString('en-IN')}
+      
+      Your invoice is attached to this email as a PDF.
+      
+      You can now access your purchased package by logging into your account at Prayash Assets.
+      
+      Best regards,
+      The Prayash Assets Team
+    `;
+
+    return await this.sendEmail({
+      to: email,
+      subject,
+      html,
+      text,
+      attachments: [
+        {
+          filename: `invoice-${paymentId}.pdf`,
+          content: invoicePdf,
+          contentType: 'application/pdf',
+        },
+      ],
     });
   }
 }

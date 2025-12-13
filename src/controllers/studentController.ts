@@ -66,7 +66,7 @@ export const getPurchasedPackages = async (
       status: "captured"
     }).populate({
       path: "package",
-      select: "name description price originalPrice discountPercentage validityDays files links mockTests",
+      select: "name description price originalPrice discountPercentage duration files links mockTests",
       populate: {
         path: "mockTests",
         select: "title description duration totalMarks status testType",
@@ -91,10 +91,13 @@ export const getPurchasedPackages = async (
         mockTestsCount: pkg.mockTests?.length || 0
       });
 
-      // Calculate expiry date (30 days from purchase)
-      const validityDays = pkg.validityDays || 30;
+      // Calculate expiry date using package duration (validity in days)
+      const validityDays = pkg.duration || 30;
       const purchaseDate = new Date(purchase.createdAt);
       const expiryDate = new Date(purchaseDate.getTime() + (validityDays * 24 * 60 * 60 * 1000));
+
+      // Filter out null mock tests (in case referenced mock test was deleted)
+      const validMockTests = (pkg.mockTests || []).filter((mt: any) => mt != null);
 
       return {
         _id: pkg._id,
@@ -105,7 +108,7 @@ export const getPurchasedPackages = async (
         discountPercentage: pkg.discountPercentage,
         validityDays: validityDays,
         duration: validityDays, // Keep compatibility
-        mockTests: pkg.mockTests || [],
+        mockTests: validMockTests,
         files: pkg.files || [],
         links: pkg.links || [],
         purchaseDate: purchaseDate.toISOString(),

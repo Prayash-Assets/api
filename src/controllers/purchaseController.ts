@@ -6,6 +6,7 @@ import Razorpay from "razorpay";
 import { validatePaymentVerification } from "razorpay/dist/utils/razorpay-utils";
 import PDFDocument from "pdfkit";
 import path from "path";
+import emailService from "../utils/emailService";
 
 // Initialize Razorpay instance
 const razorpay = new Razorpay({
@@ -288,6 +289,14 @@ export const verifyPayment = async (
           } catch (packageError) {
             console.error("❌ Package assignment failed:", packageError);
           }
+
+          // Send invoice email (await to ensure it completes in Lambda environment)
+          try {
+            await sendInvoiceEmail((purchaseWithPackage as any)._id.toString());
+          } catch (emailError) {
+            console.error("❌ Invoice email sending failed:", emailError);
+            // Don't throw - email failure shouldn't break the purchase flow
+          }
         } else if (payment.status === 'authorized') {
           purchaseWithPackage.status = "authorized";
           console.log("⚠️ Payment authorized but not captured");
@@ -396,6 +405,269 @@ const addPackageToStudent = async (userId: string, packageId: string) => {
   } catch (error) {
     console.error("❌ Error in addPackageToStudent:", error);
     throw error;
+  }
+};
+
+// Helper function to generate invoice PDF as a Buffer (for email attachment)
+const generateInvoicePdfBuffer = async (purchaseId: string): Promise<Buffer | null> => {
+  try {
+    console.log(`📄 Generating invoice PDF for purchase: ${purchaseId}`);
+
+    // Get purchase with populated user and package data
+    const purchase = await Purchase.findById(purchaseId)
+      .populate("user", "fullname email phone")
+      .populate("package", "name description price duration");
+
+    if (!purchase || purchase.status !== "captured") {
+      console.log(`❌ Cannot generate invoice: Purchase not found or not captured`);
+      return null;
+    }
+
+    const populatedUser = purchase.user as any;
+    const populatedPackage = purchase.package as any;
+
+    // Create PDF document
+    const doc = new PDFDocument({ margin: 50 });
+    const chunks: Buffer[] = [];
+
+    // Set up data collection
+    doc.on("data", (chunk) => {
+      chunks.push(chunk);
+    });
+
+    // Handle PDF completion
+    const pdfPromise = new Promise<Buffer>((resolve, reject) => {
+      doc.on("end", () => {
+        try {
+          const pdfBuffer = Buffer.concat(chunks);
+          console.log(`✅ Invoice PDF generated, size: ${pdfBuffer.length} bytes`);
+          resolve(pdfBuffer);
+        } catch (error) {
+          console.error("Error concatenating PDF chunks:", error);
+          reject(error);
+        }
+      });
+
+      doc.on("error", (error) => {
+        console.error("PDF generation error:", error);
+        reject(error);
+      });
+    });
+
+    // App brand colors
+    const primaryBlue = "#3B82F6";
+    const successGreen = "#22C55E";
+    const darkGray = "#1F2937";
+    const lightGray = "#F8FAFC";
+    const white = "#FFFFFF";
+    const textGray = "#6B7280";
+
+    // Header with brand colors
+    doc.fillColor(primaryBlue);
+    doc.rect(0, 0, doc.page.width, 140).fill();
+
+    // Company header
+    doc
+      .fillColor(white)
+      .fontSize(24)
+      .font("Helvetica-Bold")
+      .text("Prayash Assets", 50, 40);
+
+    doc
+      .fontSize(12)
+      .font("Helvetica")
+      .text("Educational Excellence", 50, 75)
+      .text("Wanless Housing Society, Near Vinayak Nagar", 50, 88)
+      .text("Wanlesswadi", 50, 101)
+      .text("Phone: +91 70209 26032", 50, 114)
+      .text("Email: support@prayashassets.com", 50, 127);
+
+    // Payment Success badge
+    doc
+      .fillColor(white)
+      .fontSize(10)
+      .font("Helvetica-Bold")
+      .text("PAYMENT SUCCESSFUL", 430, 65);
+
+    // Reset to dark gray
+    doc.fillColor(darkGray);
+
+    // Receipt title
+    doc.fillColor(lightGray).rect(50, 160, doc.page.width - 100, 40).fill();
+    doc
+      .fillColor(darkGray)
+      .fontSize(20)
+      .font("Helvetica-Bold")
+      .text("PAYMENT RECEIPT", 50, 175);
+
+    // Receipt details
+    doc.fontSize(12).font("Helvetica");
+    const leftColumn = 70;
+    const rightColumn = 320;
+    let yPosition = 230;
+
+    // Receipt information section
+    doc.fillColor(primaryBlue).fontSize(14).font("Helvetica-Bold").text("RECEIPT INFORMATION", leftColumn, yPosition);
+    yPosition += 25;
+
+    doc.fillColor(darkGray).fontSize(11).font("Helvetica");
+    doc.text("Receipt Number:", leftColumn, yPosition);
+    doc.font("Helvetica-Bold").text(purchase.razorpayPaymentId || "N/A", rightColumn, yPosition);
+    yPosition += 18;
+
+    doc.font("Helvetica").text("Order ID:", leftColumn, yPosition);
+    doc.font("Helvetica-Bold").text(purchase.razorpayOrderId, rightColumn, yPosition);
+    yPosition += 18;
+
+    doc.font("Helvetica").text("Payment Date:", leftColumn, yPosition);
+    doc.font("Helvetica-Bold").text(
+      new Date(purchase.createdAt).toLocaleDateString("en-IN", {
+        year: "numeric",
+        month: "long",
+        day: "numeric",
+        hour: "2-digit",
+        minute: "2-digit",
+      }),
+      rightColumn,
+      yPosition
+    );
+    yPosition += 18;
+
+    doc.font("Helvetica").text("Status:", leftColumn, yPosition);
+    doc.fillColor(successGreen).font("Helvetica-Bold").text("Paid", rightColumn, yPosition);
+    doc.fillColor(darkGray);
+    yPosition += 35;
+
+    // Customer details section
+    doc.fillColor(primaryBlue).fontSize(14).font("Helvetica-Bold").text("CUSTOMER DETAILS", leftColumn, yPosition);
+    yPosition += 25;
+
+    doc.fillColor(darkGray).fontSize(11).font("Helvetica");
+    doc.text("Name:", leftColumn, yPosition);
+    doc.font("Helvetica-Bold").text(populatedUser.fullname, rightColumn, yPosition);
+    yPosition += 18;
+
+    doc.font("Helvetica").text("Email:", leftColumn, yPosition);
+    doc.font("Helvetica-Bold").text(populatedUser.email, rightColumn, yPosition);
+    yPosition += 18;
+
+    if (populatedUser.phone) {
+      doc.font("Helvetica").text("Phone:", leftColumn, yPosition);
+      doc.font("Helvetica-Bold").text(populatedUser.phone.toString(), rightColumn, yPosition);
+      yPosition += 18;
+    }
+    yPosition += 25;
+
+    // Package details section
+    doc.fillColor(primaryBlue).fontSize(14).font("Helvetica-Bold").text("PACKAGE DETAILS", leftColumn, yPosition);
+    yPosition += 25;
+
+    doc.fillColor(darkGray).fontSize(11).font("Helvetica");
+    doc.text("Package Name:", leftColumn, yPosition);
+    doc.font("Helvetica-Bold").text(populatedPackage.name, rightColumn, yPosition);
+    yPosition += 18;
+
+    if (populatedPackage.description) {
+      doc.font("Helvetica").text("Description:", leftColumn, yPosition);
+      doc.font("Helvetica-Bold").text(populatedPackage.description, rightColumn, yPosition, { width: 200, height: 50 });
+      yPosition += 50;
+    }
+
+    if (populatedPackage.duration) {
+      doc.font("Helvetica").text("Validity Period:", leftColumn, yPosition);
+      doc.font("Helvetica-Bold").text(`${populatedPackage.duration} days`, rightColumn, yPosition);
+      yPosition += 18;
+    }
+    yPosition += 25;
+
+    // Payment details section
+    doc.fillColor(primaryBlue).fontSize(14).font("Helvetica-Bold").text("PAYMENT DETAILS", leftColumn, yPosition);
+    yPosition += 25;
+
+    doc.fillColor(darkGray).fontSize(11).font("Helvetica");
+    doc.text("Amount:", leftColumn, yPosition);
+    doc.font("Helvetica-Bold").text(`₹${purchase.amount.toFixed(2)}`, rightColumn, yPosition);
+    yPosition += 18;
+
+    doc.font("Helvetica").text("Currency:", leftColumn, yPosition);
+    doc.font("Helvetica-Bold").text(purchase.currency, rightColumn, yPosition);
+    yPosition += 35;
+
+    // Total amount box
+    doc.fillColor(successGreen).roundedRect(leftColumn, yPosition, 450, 40, 5).fill();
+    doc.fillColor(white).fontSize(16).font("Helvetica-Bold").text("TOTAL AMOUNT PAID:", leftColumn + 15, yPosition + 15);
+    doc.fontSize(18).text(`₹${purchase.amount.toFixed(2)}`, rightColumn + 80, yPosition + 15);
+    yPosition += 70;
+
+    // Footer
+    doc
+      .fillColor(textGray)
+      .fontSize(10)
+      .font("Helvetica")
+      .text("This is a computer-generated receipt and does not require a signature.", leftColumn, yPosition);
+    doc.text("For any queries, please contact us at support@prayashassets.com", leftColumn, yPosition + 15);
+
+    // End the PDF document
+    doc.end();
+
+    // Wait for PDF to be generated
+    const pdfBuffer = await pdfPromise;
+    return pdfBuffer.length > 0 ? pdfBuffer : null;
+
+  } catch (error) {
+    console.error("❌ Error generating invoice PDF:", error);
+    return null;
+  }
+};
+
+// Helper function to send invoice email after purchase
+const sendInvoiceEmail = async (purchaseId: string): Promise<void> => {
+  try {
+    console.log(`📧 [INVOICE EMAIL] Starting for purchase: ${purchaseId}`);
+
+    // Get purchase with populated data
+    const purchase = await Purchase.findById(purchaseId)
+      .populate("user", "fullname email")
+      .populate("package", "name");
+
+    if (!purchase) {
+      console.error("❌ [INVOICE EMAIL] Purchase not found:", purchaseId);
+      return;
+    }
+
+    const populatedUser = purchase.user as any;
+    const populatedPackage = purchase.package as any;
+
+    console.log(`📧 [INVOICE EMAIL] Sending to: ${populatedUser.email}, Package: ${populatedPackage.name}`);
+
+    // Generate the invoice PDF
+    console.log(`📧 [INVOICE EMAIL] Generating PDF...`);
+    const invoicePdf = await generateInvoicePdfBuffer(purchaseId);
+    if (!invoicePdf) {
+      console.error("❌ [INVOICE EMAIL] Failed to generate invoice PDF");
+      return;
+    }
+    console.log(`📧 [INVOICE EMAIL] PDF generated, size: ${invoicePdf.length} bytes`);
+
+    // Send the email with invoice attachment
+    console.log(`📧 [INVOICE EMAIL] Sending email via email service...`);
+    const emailSent = await emailService.sendPurchaseInvoice(
+      populatedUser.email,
+      populatedUser.fullname,
+      populatedPackage.name,
+      purchase.amount,
+      purchase.razorpayPaymentId || purchase.razorpayOrderId,
+      invoicePdf
+    );
+
+    if (emailSent) {
+      console.log(`✅ [INVOICE EMAIL] Email sent successfully to ${populatedUser.email}`);
+    } else {
+      console.error(`❌ [INVOICE EMAIL] Email service returned false for ${populatedUser.email}`);
+    }
+  } catch (error) {
+    console.error("❌ [INVOICE EMAIL] Error:", error);
+    // Don't throw - we don't want email failure to break the purchase flow
   }
 };
 

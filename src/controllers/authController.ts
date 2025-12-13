@@ -13,7 +13,10 @@ const registerSchema = Joi.object({
   fullname: Joi.string().min(3).max(30).required(),
   email: Joi.string().email().required(),
   password: Joi.string().min(6).required(),
-  phone: Joi.number().optional(),
+  phone: Joi.number().required().messages({
+    'number.base': 'Phone number must be a valid number',
+    'any.required': 'Phone number is required'
+  }),
   userType: Joi.string()
     .valid("student", "admin", "Student", "Admin")
     .required(),
@@ -68,7 +71,7 @@ const resendVerificationSchema = Joi.object({
 });
 
 // Helper function to generate JWT token
-const generateToken = (user: IUser, expiresIn: string = "1h"): string => {
+const generateToken = (user: IUser, expiresIn: string = "3h"): string => {
   const secret = process.env.JWT_SECRET || "your-secret-key";
   const payload = {
     id: user.id,
@@ -189,13 +192,6 @@ export async function register(request: FastifyRequest, reply: FastifyReply) {
         lastCodeSentAt: new Date(),
       });
     } else if (userType === "Admin") {
-      // Validate required phone for Admin
-      if (!phone) {
-        return reply
-          .status(400)
-          .send({ error: "Phone number is required for Admin users" });
-      }
-
       newUser = await Admin.create({
         fullname,
         email,
@@ -349,7 +345,7 @@ export async function login(request: FastifyRequest, reply: FastifyReply) {
     await user.save();
 
     // Generate tokens
-    const accessToken = generateToken(user, "1h");
+    const accessToken = generateToken(user, "3h");
     const refreshToken = generateToken(user, "7d");
 
     logger.info("User logged in successfully", {
@@ -593,7 +589,7 @@ export async function refreshToken(
     }
 
     // Generate new access token
-    const newAccessToken = generateToken(user, "1h");
+    const newAccessToken = generateToken(user, "3h");
 
     logger.info("Token refreshed", { userId: user.id });
     reply.send({

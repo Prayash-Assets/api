@@ -134,14 +134,26 @@ export const getAllQuestions = async (
     const page = parseInt((request.query as any)?.page || '1');
     const limit = parseInt((request.query as any)?.limit || '50');
     const search = (request.query as any)?.search;
+    const category = (request.query as any)?.category;
+    const subject = (request.query as any)?.subject;
     const skip = (page - 1) * limit;
 
     // Build search query
-    let searchQuery = {};
+    let searchQuery: any = {};
+
+    // Text search
     if (search) {
-      searchQuery = {
-        text: { $regex: search, $options: 'i' }
-      };
+      searchQuery.text = { $regex: search, $options: 'i' };
+    }
+
+    // Category filter
+    if (category) {
+      searchQuery.category_id = category;
+    }
+
+    // Subject filter
+    if (subject) {
+      searchQuery.subject_id = subject;
     }
 
     const [questions, totalQuestions] = await Promise.all([
@@ -214,13 +226,13 @@ export const deleteQuestion = async (
 ) => {
   try {
     const questionId = request.params.id;
-    
+
     // Check if question is referenced by any mock tests
     const { MockTest } = await import("../models/MockTest");
     const mockTestCount = await MockTest.countDocuments({
       questions: questionId,
     });
-    
+
     if (mockTestCount > 0) {
       return reply.status(409).send({
         message: `Cannot delete question. It is referenced by ${mockTestCount} mock test${mockTestCount > 1 ? "s" : ""}. Please remove this question from those tests first.`,
@@ -228,7 +240,7 @@ export const deleteQuestion = async (
         referencedCount: mockTestCount,
       });
     }
-    
+
     const question = await Question.findByIdAndDelete({
       _id: questionId,
     });
@@ -388,9 +400,8 @@ export const uploadQuestionsFromExcel = async (
       } catch (rowError) {
         errors.push({
           row: rowNumber,
-          message: `Processing error: ${
-            rowError instanceof Error ? rowError.message : "Unknown error"
-          }`,
+          message: `Processing error: ${rowError instanceof Error ? rowError.message : "Unknown error"
+            }`,
         });
       }
     }
@@ -673,9 +684,8 @@ export const uploadQuestionsFromCSV = async (
       } catch (rowError) {
         errors.push({
           row: rowNumber,
-          message: `Processing error: ${
-            rowError instanceof Error ? rowError.message : "Unknown error"
-          }`,
+          message: `Processing error: ${rowError instanceof Error ? rowError.message : "Unknown error"
+            }`,
         });
       }
     }
@@ -708,8 +718,7 @@ export const uploadQuestionsFromCSV = async (
       for (let i = 0; i < validQuestions.length; i += batchSize) {
         const batch = validQuestions.slice(i, i + batchSize);
         console.log(
-          `[UPLOAD_CSV] Inserting batch ${
-            Math.floor(i / batchSize) + 1
+          `[UPLOAD_CSV] Inserting batch ${Math.floor(i / batchSize) + 1
           }/${Math.ceil(validQuestions.length / batchSize)}`
         );
 
