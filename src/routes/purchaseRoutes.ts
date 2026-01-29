@@ -9,6 +9,7 @@ import {
   cancelOrder,
   getPendingOrders,
   capturePayment,
+  assignPackageManually,
 } from "../controllers/purchaseController";
 import { checkRoles as rbacMiddleware } from "../middleware/rbacMiddleware";
 
@@ -65,6 +66,15 @@ export default async function purchaseRoutes(
       preHandler: [rbacMiddleware(["admin"])]
     },
     capturePayment
+  );
+
+  // Manual assign package (admin only)
+  fastify.post<{ Body: { userId: string; packageId: string; paymentMode: string; notes?: string } }>(
+    "/assign",
+    {
+      preHandler: [rbacMiddleware(["admin"])]
+    },
+    assignPackageManually
   );
 
   // Get pending orders for the logged-in user

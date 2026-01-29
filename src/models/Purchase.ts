@@ -1,4 +1,4 @@
-import { Document, Schema, model } from "mongoose";
+import { Document, Schema, model, Types } from "mongoose";
 import { IUser } from "./User";
 import { IPackage } from "./Package";
 
@@ -11,12 +11,12 @@ export interface IPurchase extends Document {
   amount: number;
   currency: string;
   status:
-    | "created"
-    | "authorized"
-    | "captured"
-    | "failed"
-    | "refunded"
-    | "cancelled";
+  | "created"
+  | "authorized"
+  | "captured"
+  | "failed"
+  | "refunded"
+  | "cancelled";
   orderDetails: {
     packageName: string;
     packageDescription?: string;
@@ -24,6 +24,10 @@ export interface IPurchase extends Document {
     customerName: string;
     customerPhone?: string;
   };
+  // Discount tracking (optional - null for pre-discount purchases)
+  discountApplication?: Types.ObjectId;
+  // Referral tracking (optional - null if no referral code used)
+  referralUsage?: Types.ObjectId;
   paymentMethod?: string;
   failureReason?: string;
   createdAt: Date;
@@ -61,6 +65,18 @@ const PurchaseSchema = new Schema<IPurchase>(
     },
     paymentMethod: { type: String },
     failureReason: { type: String },
+    // Discount audit trail reference (null for pre-discount purchases)
+    discountApplication: {
+      type: Schema.Types.ObjectId,
+      ref: "DiscountApplication",
+      default: null
+    },
+    // Referral usage reference (null if no referral code was used)
+    referralUsage: {
+      type: Schema.Types.ObjectId,
+      ref: "ReferralUsage",
+      default: null
+    },
   },
   { timestamps: true }
 );

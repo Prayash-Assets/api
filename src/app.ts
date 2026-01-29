@@ -20,6 +20,12 @@ import dashboardRoutes from "./routes/dashboardRoutes";
 import testRoutes from "./routes/testRoutes";
 import webhookRoutes from "./routes/webhookRoutes";
 import fileRoutes from "./routes/fileRoutes";
+import { discountRoutes } from "./routes/discountRoutes";
+import { groupRoutes } from "./routes/groupRoutes";
+import { organizationRoutes } from "./routes/organizationRoutes";
+import referralRoutes from "./routes/referralRoutes";
+import referralSettingsRoutes from "./routes/referralSettingsRoutes";
+import { commissionRoutes } from "./routes/commissionRoutes";
 import { validateSession } from "./middleware/sessionMiddleware";
 
 import cors from "@fastify/cors";
@@ -47,6 +53,7 @@ export const createApp = async (): Promise<FastifyInstance> => {
     origin: [
       'https://main.d29juw0qooqw8k.amplifyapp.com',
       'http://localhost:3000', // For local development
+      'http://localhost:3001', // For local development
       'https://prayashassets.com', // Production frontend
       'https://www.prayashassets.com' // Production frontend with www
     ],
@@ -84,6 +91,15 @@ export const createApp = async (): Promise<FastifyInstance> => {
     return { status: "ok", timestamp: new Date().toISOString() };
   });
 
+  // Set UTF-8 charset for all responses
+  app.addHook("onSend", async (request, reply, payload) => {
+    const contentType = reply.getHeader("content-type") as string;
+    if (contentType && contentType.includes("application/json") && !contentType.includes("charset")) {
+      reply.header("content-type", "application/json; charset=utf-8");
+    }
+    return payload;
+  });
+
   // Register routes
   await app.register(userRoutes, { prefix: "/api" });
   await app.register(authRoutes, { prefix: "/api/auth" });
@@ -104,6 +120,12 @@ export const createApp = async (): Promise<FastifyInstance> => {
   await app.register(testRoutes, { prefix: "/api/test" });
   await app.register(webhookRoutes, { prefix: "/api/webhooks" });
   await app.register(fileRoutes, { prefix: "/api/files" });
+  await app.register(discountRoutes, { prefix: "/api/discounts" });
+  await app.register(groupRoutes, { prefix: "/api/groups" });
+  await app.register(organizationRoutes, { prefix: "/api/organizations" });
+  await app.register(referralRoutes, { prefix: "/api/referrals" });
+  await app.register(referralSettingsRoutes, { prefix: "/api/settings/referral" });
+  await app.register(commissionRoutes, { prefix: "/api/commissions" });
 
   return app;
 };

@@ -7,6 +7,20 @@ import { validatePaymentVerification } from "razorpay/dist/utils/razorpay-utils"
 import PDFDocument from "pdfkit";
 import path from "path";
 import emailService from "../utils/emailService";
+// Discount module imports
+import StudyGroup from "../models/StudyGroup";
+import Organization from "../models/Organization";
+import OrganizationMember from "../models/OrganizationMember";
+import DiscountApplication from "../models/DiscountApplication";
+import ReferralSettings from "../models/ReferralSettings";
+import ReferralUsage from "../models/ReferralUsage";
+import {
+  validateCodeFormat,
+  normalizeCode,
+  calculateReferralDiscount,
+  calculateReferrerCredit
+} from "../utils/referralUtils";
+import { updateCommissionForPurchase } from "./webhookController";
 
 // Initialize Razorpay instance
 const razorpay = new Razorpay({
@@ -16,6 +30,10 @@ const razorpay = new Razorpay({
 
 export interface CreateOrderBody {
   packageId: string;
+  // Optional discount parameters
+  groupId?: string;       // Apply group discount
+  organizationId?: string; // Apply organization discount
+  referralCode?: string;   // Apply referral discount
 }
 
 export interface VerifyPaymentBody {
@@ -106,16 +124,214 @@ export const createOrder = async (
     // Generate unique receipt number
     const receiptNumber = `RCP_${Date.now()}_${userId.slice(-4)}`;
 
+    // ============ DISCOUNT CALCULATION ============
+    const { groupId, organizationId } = req.body;
+    const packageOriginalPrice = pkg.originalPrice || pkg.price;
+    const packageDiscountedPrice = pkg.getDisplayPrice(); // Already has package discount applied
+
+    let eligibilityDiscountType: "group" | "organization" | "none" = "none";
+    let eligibilityDiscountPercentage = 0;
+    let eligibilityDiscountSource: any = null;
+    let eligibilityDiscountAmount = 0;
+    let finalPrice = packageDiscountedPrice;
+    let floorPriceApplied = false;
+    let discountMetadata: any = {};
+
+    // Only apply eligibility discount if enabled for this package
+    if (pkg.eligibilityDiscountEnabled) {
+      // Validate and apply group discount
+      if (groupId) {
+        const group = await StudyGroup.findById(groupId);
+        if (group && group.members.some((m: any) => m.toString() === userId)) {
+          if (group.isDiscountValid()) {
+            eligibilityDiscountType = "group";
+            eligibilityDiscountPercentage = group.discountPercentage;
+            eligibilityDiscountSource = group._id;
+            discountMetadata = {
+              groupMemberCount: group.memberCount,
+              groupCode: group.code,
+            };
+          }
+        }
+      }
+
+      // Validate and apply organization discount (only if no group discount)
+      if (eligibilityDiscountType === "none") {
+        let targetOrgId = organizationId;
+
+        // If no org ID provided, auto-detect from user's membership
+        if (!targetOrgId) {
+          const userMembership = await OrganizationMember.findOne({
+            user: userId,
+            status: { $in: ["registered", "active"] }
+          });
+          if (userMembership) {
+            targetOrgId = userMembership.organization.toString();
+          }
+        }
+
+        if (targetOrgId) {
+          const org = await Organization.findById(targetOrgId);
+          if (org && org.status === "verified") {
+            const membership = await OrganizationMember.findOne({
+              user: userId,
+              organization: targetOrgId,
+              status: { $in: ["registered", "active"] },
+            });
+
+            if (membership) {
+              eligibilityDiscountType = "organization";
+              eligibilityDiscountPercentage = org.discountPercentage;
+              eligibilityDiscountSource = org._id;
+              discountMetadata = {
+                orgTier: org.tier,
+                orgName: org.name,
+              };
+            }
+          }
+        }
+      }
+
+      // Calculate eligibility discount amount
+      if (eligibilityDiscountPercentage > 0) {
+        eligibilityDiscountAmount = packageDiscountedPrice * (eligibilityDiscountPercentage / 100);
+        finalPrice = packageDiscountedPrice - eligibilityDiscountAmount;
+
+        // Apply floor price cap
+        if (pkg.minFloorPrice && finalPrice < pkg.minFloorPrice) {
+          finalPrice = pkg.minFloorPrice;
+          eligibilityDiscountAmount = packageDiscountedPrice - finalPrice;
+          floorPriceApplied = true;
+        }
+
+        // Apply max additional discount cap
+        if (pkg.maxAdditionalDiscount) {
+          const maxAllowed = packageDiscountedPrice * (pkg.maxAdditionalDiscount / 100);
+          if (eligibilityDiscountAmount > maxAllowed) {
+            eligibilityDiscountAmount = maxAllowed;
+            finalPrice = packageDiscountedPrice - eligibilityDiscountAmount;
+          }
+        }
+      }
+    }
+
+
+    // ============ REFERRAL CALCULATION ============
+    const { referralCode } = req.body;
+    let referralDiscountAmount = 0;
+    let referralValidatorResults: any = null;
+    let referralSettings: any = null;
+    let referrerUser: any = null;
+
+    if (referralCode) {
+      // 1. Basic format validation
+      if (!validateCodeFormat(referralCode)) {
+        return reply.status(400).send({ message: "Invalid referral code format" });
+      }
+
+      const normalizedCode = normalizeCode(referralCode);
+
+      // 2. Check settings
+      referralSettings = await ReferralSettings.findOne();
+      if (!referralSettings || !referralSettings.isActive) {
+        return reply.status(400).send({ message: "Referral program is not active" });
+      }
+
+      // 3. Find referrer
+      referrerUser = await User.findOne({
+        referralCode: normalizedCode,
+        userType: "Student"
+      });
+
+      if (!referrerUser) {
+        return reply.status(400).send({ message: "Invalid referral code" });
+      }
+
+      // 4. Prevent self-referral
+      if (referrerUser._id.toString() === userId) {
+        return reply.status(400).send({ message: "You cannot use your own referral code" });
+      }
+
+      // 5. Check duplicate usage
+      const existingUsage = await ReferralUsage.findOne({
+        referrer: referrerUser._id,
+        referee: userId,
+        status: { $in: ["pending", "completed"] }
+      });
+
+      if (existingUsage) {
+        return reply.status(400).send({ message: "You have already used this referral code" });
+      }
+
+      // 6. Check max usage limit
+      if (referralSettings.maxUsagePerCode) {
+        const usageCount = await ReferralUsage.countDocuments({
+          referralCode: normalizedCode,
+          status: { $in: ["pending", "completed"] }
+        });
+
+        if (usageCount >= referralSettings.maxUsagePerCode) {
+          return reply.status(400).send({ message: "This referral code has reached its usage limit" });
+        }
+      }
+
+      // 7. Calculate Discount
+      // Note: Referral discount is applied ON TOP of other discounts (on the finalPrice so far)
+      // OR you can decide to apply it on packageDiscountedPrice.
+      // Usually referral is applied on the amount *to be paid*.
+
+      const referralCalc = calculateReferralDiscount(
+        finalPrice, // Apply on current final price
+        referralSettings.discountType,
+        referralSettings.refereeBenefit,
+        referralSettings.minPurchaseAmount
+      );
+
+      if (!referralCalc.isEligible) {
+        return reply.status(400).send({
+          message: referralCalc.reason || "Not eligible for referral discount"
+        });
+      }
+
+      referralDiscountAmount = referralCalc.discountAmount;
+      finalPrice = finalPrice - referralDiscountAmount; // Update final price
+
+      // Ensure we don't go below 0 (though calc utils handles max 90%)
+      if (finalPrice < 0) finalPrice = 0;
+    }
+
+    const totalSavings = packageOriginalPrice - finalPrice;
+    const totalDiscountPercentage = packageOriginalPrice > 0
+      ? ((packageOriginalPrice - finalPrice) / packageOriginalPrice) * 100
+      : 0;
+
+    console.log("💰 Discount calculation:", {
+      packageOriginalPrice,
+      packageDiscountedPrice,
+      eligibilityDiscountType,
+      eligibilityDiscountPercentage,
+      eligibilityDiscountAmount,
+      finalPrice,
+      totalSavings,
+      floorPriceApplied,
+    });
+
     const options = {
-      amount: pkg.getDisplayPrice() * 100, // Use discounted price if available, amount in paise (currency subunits)
+      amount: Math.round(finalPrice * 100), // Final price in paise
       currency: "INR",
       receipt: receiptNumber,
       notes: {
         package_id: packageId,
         user_id: userId,
-        original_price: pkg.originalPrice || pkg.price,
-        discount_percentage: pkg.discountPercentage || 0,
-        final_price: pkg.getDisplayPrice(),
+        original_price: packageOriginalPrice,
+        package_discount_percentage: pkg.discountPercentage || 0,
+        package_discounted_price: packageDiscountedPrice,
+        eligibility_discount_type: eligibilityDiscountType,
+        eligibility_discount_percentage: eligibilityDiscountPercentage,
+        eligibility_discount_amount: eligibilityDiscountAmount,
+        referral_discount_amount: referralDiscountAmount,
+        final_price: finalPrice,
+        total_savings: totalSavings + referralDiscountAmount,
       },
     };
 
@@ -128,7 +344,7 @@ export const createOrder = async (
       package: packageId,
       razorpayOrderId: order.id,
       razorpayPaymentId: null,
-      amount: pkg.getDisplayPrice(), // Store the same price sent to Razorpay
+      amount: finalPrice, // Store the final discounted price
       currency: order.currency,
       status: "created",
       orderDetails: {
@@ -142,10 +358,69 @@ export const createOrder = async (
 
     await newPurchase.save();
 
+    // Create DiscountApplication audit record
+    const discountApplication = new DiscountApplication({
+      purchase: newPurchase._id,
+      user: userId,
+      packageOriginalPrice,
+      packageDiscountPercentage: pkg.discountPercentage || 0,
+      packageDiscountedPrice,
+      eligibilityDiscountType,
+      eligibilityDiscountSource,
+      eligibilityDiscountPercentage,
+      eligibilityDiscountAmount,
+      finalPrice,
+      totalSavings: totalSavings + referralDiscountAmount,
+      totalDiscountPercentage: Math.round(totalDiscountPercentage * 100) / 100,
+      floorPriceApplied,
+      cappedAt: floorPriceApplied ? pkg.minFloorPrice : null,
+      validatedAt: new Date(),
+      metadata: discountMetadata,
+    });
+
+    await discountApplication.save();
+
+    // Link discount application to purchase
+    newPurchase.discountApplication = discountApplication._id as any;
+    await newPurchase.save();
+
+    // Create ReferralUsage record if applicable
+    let referralUsageRecord: any = null;
+    if (referralCode && referrerUser && referralSettings && referralDiscountAmount > 0) {
+      // Calculate what referrer gets
+      const referrerCredit = calculateReferrerCredit(
+        finalPrice + referralDiscountAmount, // Original amount before referral discount
+        referralSettings.discountType,
+        referralSettings.referrerBenefit
+      );
+
+      referralUsageRecord = await ReferralUsage.create({
+        referralCode: normalizeCode(referralCode),
+        referrer: referrerUser._id,
+        referee: userId,
+        purchase: newPurchase._id,
+        benefitType: referralSettings.discountType,
+        referrerBenefitValue: referralSettings.referrerBenefit,
+        refereeBenefitValue: referralSettings.refereeBenefit,
+        referrerCreditAmount: referrerCredit,
+        refereeDiscountAmount: referralDiscountAmount,
+        purchaseAmount: finalPrice + referralDiscountAmount,
+        finalPurchaseAmount: finalPrice,
+        status: "pending"
+      });
+
+      newPurchase.referralUsage = referralUsageRecord._id;
+      await newPurchase.save();
+    }
+
     console.log("Razorpay order created successfully:", {
       orderId: order.id,
       packageName: pkg.name,
-      amount: pkg.getDisplayPrice(), // Show the actual amount charged
+      originalPrice: packageOriginalPrice,
+      finalPrice: finalPrice,
+      totalSavings: totalSavings + referralDiscountAmount,
+      referralDiscount: referralDiscountAmount,
+      discountType: eligibilityDiscountType,
       currency: order.currency,
       customerEmail: user.email,
       cancelledPreviousOrders: existingPendingOrders.length,
@@ -160,7 +435,17 @@ export const createOrder = async (
       packageDetails: {
         name: pkg.name,
         description: pkg.description,
-        price: pkg.getDisplayPrice(), // Return the actual price charged
+        originalPrice: packageOriginalPrice,
+        packageDiscountedPrice: packageDiscountedPrice,
+        finalPrice: finalPrice,
+      },
+      discountDetails: {
+        eligibilityDiscountType,
+        eligibilityDiscountPercentage,
+        eligibilityDiscountAmount,
+        referralDiscountAmount,
+        totalSavings: totalSavings + referralDiscountAmount,
+        floorPriceApplied,
       },
       customerDetails: {
         name: user.fullname,
@@ -276,6 +561,10 @@ export const verifyPayment = async (
           purchaseWithPackage.status = "captured";
           console.log("✅ Payment captured successfully");
 
+          // IMPORTANT: Save the purchase FIRST so invoice PDF can find it with "captured" status
+          await purchaseWithPackage.save();
+          console.log("✅ Purchase saved with captured status");
+
           // Add package to student only after successful capture
           console.log("📚 About to add package to student:", {
             userId,
@@ -290,6 +579,60 @@ export const verifyPayment = async (
             console.error("❌ Package assignment failed:", packageError);
           }
 
+          // Update Organization Stats
+          await updateOrganizationStats(userId, purchaseWithPackage.amount);
+
+          // Update Commission Records
+          await updateCommissionForPurchase(purchaseWithPackage);
+
+          // Update Referral Stats (Mark as completed)
+          if (purchaseWithPackage.referralUsage) {
+            let usage: any = null;
+            try {
+              usage = await ReferralUsage.findById(purchaseWithPackage.referralUsage);
+              if (usage && usage.status !== "completed") {
+                usage.status = "completed";
+                usage.completedAt = new Date();
+                await usage.save();
+
+                // Credit the referrer - increment count and credits
+                const updateResult: any = await User.findByIdAndUpdate(usage.referrer, {
+                  $inc: {
+                    referralCount: 1,
+                    referralCredits: usage.referrerCreditAmount
+                  }
+                }, { new: true });
+                console.log(`✅ Referral completed: Credited ₹${usage.referrerCreditAmount} to user ${usage.referrer}. Updated referralCredits: ${(updateResult as any)?.referralCredits}`);
+              } else if (usage && usage.status === "completed") {
+                console.log(`ℹ️ Referral already completed for this purchase`);
+              }
+            } catch (refError) {
+              console.error("❌ Failed to process referral completion:", refError);
+              // Even if there's an error, try to ensure referral credits are in sync
+              if (usage) {
+                try {
+                  const allCompletedUsages = await ReferralUsage.aggregate([
+                    { $match: { referrer: usage.referrer, status: "completed" } },
+                    { $group: { _id: null, total: { $sum: "$referrerCreditAmount" } } }
+                  ]);
+                  const totalCredits = allCompletedUsages[0]?.total || 0;
+                  await User.findByIdAndUpdate(usage.referrer, {
+                    referralCredits: totalCredits,
+                    referralCount: await ReferralUsage.countDocuments({
+                      referrer: usage.referrer,
+                      status: "completed"
+                    })
+                  });
+                  console.log(`✅ Synced referral credits for user ${usage.referrer}: ₹${totalCredits}`);
+                } catch (syncError) {
+                  console.error("❌ Failed to sync referral credits:", syncError);
+                }
+              }
+            }
+          } else {
+            console.log("ℹ️ No referral usage found for this purchase");
+          }
+
           // Send invoice email (await to ensure it completes in Lambda environment)
           try {
             await sendInvoiceEmail((purchaseWithPackage as any)._id.toString());
@@ -300,12 +643,12 @@ export const verifyPayment = async (
         } else if (payment.status === 'authorized') {
           purchaseWithPackage.status = "authorized";
           console.log("⚠️ Payment authorized but not captured");
+          await purchaseWithPackage.save();
         } else {
           purchaseWithPackage.status = "failed";
           console.log("❌ Payment in unexpected status:", payment.status);
+          await purchaseWithPackage.save();
         }
-
-        await purchaseWithPackage.save();
 
         reply.status(200).send({
           message: purchaseWithPackage.status === "captured" ? "Payment captured successfully" : "Payment authorized but not captured",
@@ -340,6 +683,41 @@ export const verifyPayment = async (
   } catch (error) {
     console.error("Error verifying payment:", error);
     reply.status(500).send({ message: "Failed to verify payment", error });
+  }
+};
+
+// Helper function to update organization stats
+const updateOrganizationStats = async (userId: string, amount: number) => {
+  try {
+    console.log(`🏢 Updating organization stats for user: ${userId}`);
+    const member = await OrganizationMember.findOne({
+      user: userId,
+      status: { $in: ["active", "registered"] }
+    });
+
+    if (member) {
+      console.log(`✅ Found member record for org: ${member.organization}`);
+
+      // Update Member stats
+      member.totalPurchases = (member.totalPurchases || 0) + 1;
+      member.totalSpent = (member.totalSpent || 0) + amount;
+      member.lastPurchaseAt = new Date();
+      await member.save();
+
+      // Update Organization aggregate stats
+      await Organization.findByIdAndUpdate(member.organization, {
+        $inc: {
+          totalRevenue: amount
+        }
+      });
+
+      console.log(`✅ Updated stats for org member ${member._id} and org ${member.organization}`);
+    } else {
+      console.log(`ℹ️ User ${userId} is not an active organization member`);
+    }
+  } catch (error) {
+    console.error("❌ Failed to update organization stats:", error);
+    // Don't throw, just log - we don't want to fail the purchase response
   }
 };
 
@@ -722,7 +1100,7 @@ export const getUserPurchases = async (
     if (!isAdmin) {
       baseQuery = {
         user: userId,
-        status: { $in: ["captured", "authorized", "created"] }
+        status: { $in: ["captured", "authorized", "created", "failed", "cancelled"] }
       };
     }
 
@@ -753,8 +1131,16 @@ export const getUserPurchases = async (
 
     const totalPages = Math.ceil(totalPurchases / limit);
 
+    const purchasesWithKey = purchases.map(p => {
+      const obj = p.toObject();
+      return {
+        ...obj,
+        key: process.env.RAZORPAY_KEY_ID
+      };
+    });
+
     reply.status(200).send({
-      purchases,
+      purchases: purchasesWithKey,
       pagination: {
         currentPage: page,
         totalPages,
@@ -1610,5 +1996,113 @@ export const viewReceipt = async (
         error: error instanceof Error ? error.message : "Unknown error",
       });
     }
+  }
+};
+
+// Manually assign package to student (Admin only)
+export const assignPackageManually = async (
+  req: FastifyRequest<{ Body: { userId: string; packageId: string; paymentMode: string; notes?: string } }>,
+  reply: FastifyReply
+) => {
+  try {
+    const { userId, packageId, paymentMode, notes } = req.body;
+    const adminUser = (req as any).user;
+
+    // 1. Validation
+    if (!userId || !packageId || !paymentMode) {
+      return reply.status(400).send({ message: "UserId, PackageId and PaymentMode are required" });
+    }
+
+    // Verify Admin is done via middleware, but let's be safe
+    const userRoles = adminUser.roles || [];
+    const userType = adminUser.userType;
+    const isAdmin = userRoles.includes("admin") || userRoles.includes("Admin") || userType === "admin" || userType === "Admin";
+    if (!isAdmin) {
+      return reply.status(403).send({ message: "Admin access required" });
+    }
+
+    // Check if user exists
+    const user = await User.findById(userId);
+    if (!user) {
+      return reply.status(404).send({ message: "Student not found" });
+    }
+
+    // Check if package exists
+    const pkg = await Package.findById(packageId);
+    if (!pkg) {
+      return reply.status(404).send({ message: "Package not found" });
+    }
+
+    // 2. Check for existing successful purchase
+    const existingSuccessfulPurchase = await Purchase.findOne({
+      user: userId,
+      package: packageId,
+      status: { $in: ["captured", "authorized"] },
+    });
+
+    if (existingSuccessfulPurchase) {
+      return reply.status(400).send({ message: "Package already assigned/purchased" });
+    }
+
+    // 3. Determine price
+    const finalPrice = paymentMode === "FREE" ? 0 : (pkg.price || 0);
+
+    // 4. Create Purchase Record
+    const manualId = `MANUAL_${Date.now()}`;
+    const newPurchase = new Purchase({
+      user: userId,
+      package: packageId,
+      razorpayOrderId: manualId,
+      razorpayPaymentId: manualId,
+      razorpaySignature: "MANUAL_ASSIGNMENT",
+      amount: finalPrice,
+      currency: "INR",
+      status: "captured", // Directly captured
+      failureReason: null,
+      orderDetails: {
+        packageName: pkg.name,
+        packageDescription: pkg.description,
+        customerEmail: user.email,
+        customerName: user.fullname,
+        customerPhone: user.phone?.toString(),
+        paymentMode: paymentMode, // Custom field, might not be in schema strictly but useful if schema acts loose or we add it
+        adminNotes: notes,
+        assignedBy: adminUser.id
+      }
+    });
+
+    await newPurchase.save();
+    console.log(`✅ Manual purchase created: ${newPurchase._id}`);
+
+    // 5. Add Package to Student
+    await addPackageToStudent(userId, packageId);
+    console.log(`✅ Package ${packageId} assigned to student ${userId}`);
+
+    // 6. Update Stats
+    if (finalPrice > 0) {
+      await updateOrganizationStats(userId, finalPrice);
+    }
+
+    // 7. Send Invoice Email
+    // We wrap this in try-catch so it doesn't fail the request if email fails
+    try {
+      await sendInvoiceEmail((newPurchase as any)._id.toString());
+      console.log(`✅ Invoice email sent for manual assignment`);
+    } catch (emailError) {
+      console.error("❌ Failed to send invoice email:", emailError);
+    }
+
+    reply.status(200).send({
+      message: "Package assigned successfully",
+      purchase: newPurchase,
+      packageAccess: "granted"
+    });
+
+  } catch (error) {
+    console.error("Error in assignPackageManually:", error);
+    reply.status(500).send({
+      message: "Failed to assign package",
+      error: error instanceof Error ? error.message : "Unknown error"
+    });
   }
 };

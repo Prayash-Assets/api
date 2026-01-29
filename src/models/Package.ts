@@ -20,6 +20,10 @@ export interface IPackage extends Document {
   published?: boolean;
   publicView: boolean;
   draft?: boolean;
+  // Discount protection fields (for group/org discounts on top of package discount)
+  minFloorPrice?: number;              // Absolute minimum price package can sell for
+  maxAdditionalDiscount?: number;      // Max % discount on top of package discount (0-100)
+  eligibilityDiscountEnabled: boolean; // Allow group/org discounts on this package
   createdAt: Date;
   updatedAt: Date;
   // Virtual field for calculated discounted price
@@ -91,6 +95,22 @@ const packageSchema: Schema<IPackage> = new mongoose.Schema(
       type: Boolean,
       default: false,
     },
+    // Discount protection fields (for group/org discounts on top of package discount)
+    minFloorPrice: {
+      type: Number,
+      default: null,
+      min: 0,
+    },
+    maxAdditionalDiscount: {
+      type: Number,
+      default: null,
+      min: 0,
+      max: 100,
+    },
+    eligibilityDiscountEnabled: {
+      type: Boolean,
+      default: true, // Enable group/org discounts by default
+    },
   },
   { timestamps: true }
 );
@@ -142,7 +162,7 @@ packageSchema.pre("save", function (next) {
   // Case 1: Discount exists (being applied or modified)
   if (this.discountPercentage && this.discountPercentage > 0) {
     const discount = this.discountPercentage as number;
-    
+
     if (isNew) {
       // New document: treat price as original, calculate discounted
       this.originalPrice = this.price;

@@ -2,6 +2,7 @@ import { FastifyInstance, FastifyPluginOptions } from "fastify";
 import {
   getDashboardData,
   getPurchasedPackages,
+  getPendingOrders,
   purchasePackage,
   getAvailableMockTests,
   getMockTest,
@@ -33,6 +34,7 @@ async function studentRoutes(
   // Packages
   fastify.get("/packages", { preHandler: [checkRoles(["student"])] }, getAvailablePackages);
   fastify.get("/purchased-packages", { preHandler: [checkRoles(["student"])] }, getPurchasedPackages);
+  fastify.get("/pending-orders", { preHandler: [checkRoles(["student"])] }, getPendingOrders);
   fastify.post("/purchase", { preHandler: [checkRoles(["student"])] }, purchasePackage);
 
   // Mock tests

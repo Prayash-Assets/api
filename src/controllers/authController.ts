@@ -3,7 +3,7 @@ import Joi from "joi";
 import bcrypt from "bcryptjs";
 import jwt from "jsonwebtoken";
 import { randomUUID } from "crypto";
-import User, { IUser, Student, Admin, IStudent, IAdmin } from "../models/User";
+import User, { IUser, Student, Admin, IStudent, IAdmin, IOrgAdmin } from "../models/User";
 import Role from "../models/Role";
 import logger from "../config/logger";
 import emailService from "../utils/emailService";
@@ -371,10 +371,15 @@ export async function login(request: FastifyRequest, reply: FastifyReply) {
         state: (user as IStudent).state,
         education: (user as IStudent).education,
         school: (user as IStudent).school,
+        organization: (user as IStudent).organization,
       }),
       // Include Admin-specific fields if user is an Admin
       ...(user.userType === "Admin" && {
         address: (user as IAdmin).address,
+      }),
+      // Include OrgAdmin-specific fields if user is an OrgAdmin
+      ...(user.userType === "OrgAdmin" && {
+        organization: (user as unknown as IOrgAdmin).organization,
       }),
     };
 
@@ -745,6 +750,14 @@ export async function verifyToken(
         isVerified: user.isVerified,
         createdAt: user.createdAt,
         updatedAt: user.updatedAt,
+        // Include Student-specific fields
+        ...(user.userType === "Student" && {
+          organization: (user as IStudent).organization,
+        }),
+        // Include OrgAdmin-specific fields
+        ...(user.userType === "OrgAdmin" && {
+          organization: (user as unknown as IOrgAdmin).organization,
+        }),
       },
     });
   } catch (error) {

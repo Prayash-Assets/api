@@ -3,6 +3,7 @@ import Joi from "joi";
 import { Result, IResult } from "../models/Result";
 import { MockTest } from "../models/MockTest";
 import logger from "../config/logger";
+import { sanitizeObject } from "../utils/textSanitizer";
 
 // Validation schema for creating a result
 const resultSchema = Joi.object({
@@ -604,8 +605,8 @@ export const getResultsAnalytics = async (
         passRate:
           performer.totalAttempts > 0
             ? Math.round(
-                (performer.totalPassed / performer.totalAttempts) * 100
-              )
+              (performer.totalPassed / performer.totalAttempts) * 100
+            )
             : 0,
       })),
       testWiseStats: testWiseStats.map((test) => ({
@@ -734,8 +735,7 @@ export const exportResultsCSV = async (
     reply.header("Content-Type", "text/csv");
     reply.header(
       "Content-Disposition",
-      `attachment; filename="mocktest-results-${
-        new Date().toISOString().split("T")[0]
+      `attachment; filename="mocktest-results-${new Date().toISOString().split("T")[0]
       }.csv"`
     );
 
@@ -817,26 +817,71 @@ export const getAdminResultById = async (
         duration: (result.mockTest as any).duration,
       },
       detailedAnalysis: result.detailedAnalysis,
-      questionWiseAnalysis: result.answers.map((answer: any) => ({
-        questionId: answer.question._id,
-        questionText: answer.question.text,
-        options: answer.question.options,
-        userAnswer: answer.answer || answer.selectedAnswer,
-        correctAnswer: answer.question.correctAnswer,
-        isCorrect: answer.isCorrect,
-        marks: answer.marks,
-        timeTaken: answer.timeTaken || 0,
-        difficulty: answer.question.difficulty,
-        subject: answer.question.subject_id?.name || "General",
-        category: answer.question.category_id?.name || "General",
-        explanation: answer.question.explanation || "",
-      })),
+      questionWiseAnalysis: result.answers.map((answer: any) => {
+        const questionOptions = answer.question.options || [];
+        const rawAnswer = answer.answer || answer.selectedAnswer;
+
+        // Convert user answer to actual option text
+        let userAnswerText = rawAnswer;
+        if (rawAnswer !== null && rawAnswer !== undefined && rawAnswer !== "") {
+          // If the answer is a number (option index), get the option text
+          if (typeof rawAnswer === "number" || !isNaN(Number(rawAnswer))) {
+            const optionIndex = Number(rawAnswer);
+            if (optionIndex >= 0 && optionIndex < questionOptions.length) {
+              userAnswerText = questionOptions[optionIndex].optionText;
+            }
+          } else if (typeof rawAnswer === "string") {
+            // Check if it's an option ID and map to text
+            const matchedOption = questionOptions.find(
+              (opt: any) => opt._id?.toString() === rawAnswer || opt.optionText === rawAnswer
+            );
+            if (matchedOption) {
+              userAnswerText = matchedOption.optionText;
+            }
+          } else if (Array.isArray(rawAnswer)) {
+            // Handle multiple answers
+            userAnswerText = rawAnswer.map((ans: any) => {
+              if (typeof ans === "number" || !isNaN(Number(ans))) {
+                const optionIndex = Number(ans);
+                if (optionIndex >= 0 && optionIndex < questionOptions.length) {
+                  return questionOptions[optionIndex].optionText;
+                }
+              }
+              const matchedOption = questionOptions.find(
+                (opt: any) => opt._id?.toString() === ans || opt.optionText === ans
+              );
+              return matchedOption ? matchedOption.optionText : ans;
+            });
+          }
+        }
+
+        // Get correct answer text from options
+        const correctAnswerTexts = questionOptions
+          .filter((opt: any) => opt.isCorrect)
+          .map((opt: any) => opt.optionText);
+
+        return {
+          questionId: answer.question._id,
+          questionText: answer.question.text,
+          options: answer.question.options,
+          userAnswer: userAnswerText || "Not answered",
+          correctAnswer: correctAnswerTexts.length === 1 ? correctAnswerTexts[0] : correctAnswerTexts,
+          isCorrect: answer.isCorrect,
+          marks: answer.marks,
+          timeTaken: answer.timeTaken || 0,
+          difficulty: answer.question.difficulty,
+          subject: answer.question.subject_id?.name || "General",
+          category: answer.question.category_id?.name || "General",
+          explanation: answer.question.explanation || "",
+        };
+      }),
     };
 
     logger.info("Successfully fetched detailed result for admin", {
       id: resultId,
     });
-    reply.send(detailedResult);
+    // Sanitize text to fix encoding issues with special characters
+    reply.send(sanitizeObject(detailedResult));
   } catch (error) {
     logger.error("Error fetching detailed result for admin", {
       id: request.params.id,

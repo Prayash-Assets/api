@@ -1,5 +1,5 @@
 import { FastifyRequest, FastifyReply } from "fastify";
-import User, { IUser, IStudent, IAdmin, Student, Admin } from "../models/User";
+import User, { IUser, IStudent, IAdmin, IOrgAdmin, Student, Admin, OrgAdmin } from "../models/User";
 import { Types } from "mongoose"; // Import Types for ObjectId handling if necessary
 import bcrypt from "bcryptjs"; // Add this import for bcrypt
 
@@ -9,7 +9,7 @@ export interface ICreateUserBody {
   email?: string;
   password?: string;
   phone?: number;
-  userType: "Student" | "Admin"; // Required discriminator field
+  userType: "Student" | "Admin" | "OrgAdmin"; // Required discriminator field
   roles?: string[]; // Array of Role ObjectIds as strings
   // Student-specific fields
   city?: string;
@@ -18,6 +18,9 @@ export interface ICreateUserBody {
   school?: string;
   // Admin-specific fields
   address?: string;
+  // OrgAdmin/Student fields
+  organization?: string;
+  studyGroup?: string;
 }
 
 export interface IUserParams {
@@ -25,12 +28,6 @@ export interface IUserParams {
   id: string;
 }
 
-/**
- * Creates a new user.
- * @param req - The Fastify request object, containing user data in the body.
- * @param reply - The Fastify reply object.
- * @returns A new user object or an error message.
- */
 export const createUser = async (
   req: FastifyRequest<{ Body: ICreateUserBody }>,
   reply: FastifyReply
@@ -47,6 +44,8 @@ export const createUser = async (
       education,
       school,
       address,
+      organization,
+      studyGroup,
       ...userData
     } = req.body;
     console.log("User data:", userData);
@@ -89,6 +88,13 @@ export const createUser = async (
         .send({ error: "Phone number is required for Admin users" });
     }
 
+    // Validate OrgAdmin-specific requirements
+    if (userType === "OrgAdmin" && !organization) {
+      return reply
+        .code(400)
+        .send({ error: "Organization is required for OrgAdmin users" });
+    }
+
     // Generate an 8-digit alphanumeric password
     const generatedPassword = Math.random().toString(36).slice(-8);
 
@@ -110,6 +116,8 @@ export const createUser = async (
         education,
         school,
         userType: "Student",
+        organization: organization || null,
+        studyGroup: studyGroup || null,
       });
     } else if (userType === "Admin") {
       newUser = new Admin({
@@ -119,6 +127,15 @@ export const createUser = async (
         phone,
         address,
         userType: "Admin",
+      });
+    } else if (userType === "OrgAdmin") {
+      newUser = new OrgAdmin({
+        fullname,
+        email,
+        password: hashedPassword,
+        phone, // OrgAdmin usually needs phone? Assuming yes based on User model
+        organization,
+        userType: "OrgAdmin",
       });
     } else {
       return reply.code(400).send({ error: "Invalid user type" });
@@ -130,7 +147,10 @@ export const createUser = async (
     }
 
     await newUser.save();
-    const populatedUser = await User.findById(newUser._id).populate("roles");
+    const populatedUser = await User.findById(newUser._id)
+      .populate("roles")
+      .populate("organization")
+      .populate("studyGroup");
 
     // Return user without password and with generated password for admin reference
     const userResponse = {
@@ -154,10 +174,87 @@ export const createUser = async (
  * @param reply - The Fastify reply object.
  * @returns An array of user objects or an error message.
  */
+import OrganizationMember from "../models/OrganizationMember";
+
+/**
+ * Retrieves all users.
+ * @param req - The Fastify request object.
+ * @param reply - The Fastify reply object.
+ * @returns An array of user objects or an error message.
+ */
 export const getAllUsers = async (req: FastifyRequest, reply: FastifyReply) => {
   try {
-    const users = await User.find().populate("roles");
-    reply.send(users);
+    const users = await User.find()
+      .populate("roles")
+      .populate("organization")
+      .populate("studyGroup")
+      .lean();
+
+    // Get all user IDs
+    const userIds = users.map((u: any) => u._id);
+
+    // Find organization membership records for these users
+    // We want to know their status in their current or past organization
+    const memberRecords = await OrganizationMember.find({
+      user: { $in: userIds }
+    })
+      .populate("organization", "name")
+      .sort({ updatedAt: -1 }) // Get latest first if multiple?
+      .lean();
+
+    // Map userId -> member record
+    // We want the most relevant active record, and the most relevant (recent) removed record.
+    const statusMap = new Map();
+    const removedMap = new Map();
+
+    memberRecords.forEach((member: any) => {
+      if (!member.user) return;
+      const userId = member.user.toString();
+
+      if (member.status === 'removed') {
+        if (!removedMap.has(userId)) {
+          removedMap.set(userId, member);
+        }
+      } else if (['invited', 'registered', 'active'].includes(member.status)) {
+        // Active/Registered/Invited
+        if (!statusMap.has(userId)) {
+          statusMap.set(userId, member);
+        }
+      }
+    });
+
+    const usersWithStatus = users.map((user: any) => {
+      const userId = user._id.toString();
+      const activeMember = statusMap.get(userId);
+      const removedMember = removedMap.get(userId);
+
+      // Priority 1: User has an active/registered/invited org record
+      if (activeMember && activeMember.organization) {
+        return {
+          ...user,
+          orgStatus: activeMember.status,
+          organization: activeMember.organization,
+          userType: (user.userType as "Student" | "Admin" | "OrgAdmin") || "Student",
+        };
+      }
+
+      // Priority 2: User has no active record, but has a removed record
+      if (removedMember && removedMember.organization) {
+        return {
+          ...user,
+          orgStatus: 'removed',
+          removedFromOrg: removedMember.organization,
+          userType: (user.userType as "Student" | "Admin" | "OrgAdmin") || "Student",
+        };
+      }
+
+      return {
+        ...user,
+        userType: (user.userType as "Student" | "Admin" | "OrgAdmin") || "Student",
+      };
+    });
+
+    reply.send(usersWithStatus);
   } catch (error: any) {
     reply.code(500).send({ error: error.message });
   }
@@ -220,7 +317,10 @@ export const updateUser = async (
     const user = await User.findByIdAndUpdate(req.params.id, updateData, {
       new: true,
       runValidators: true,
-    }).populate("roles");
+    })
+      .populate("roles")
+      .populate("organization")
+      .populate("studyGroup");
 
     if (!user) {
       return reply.code(404).send({ error: "User not found" });

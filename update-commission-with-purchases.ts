@@ -1,0 +1,129 @@
+import mongoose from 'mongoose';
+import dotenv from 'dotenv';
+dotenv.config();
+import Commission from './src/models/Commission';
+import Organization from './src/models/Organization';
+import OrganizationMember from './src/models/OrganizationMember';
+import Purchase from './src/models/Purchase';
+import DiscountApplication from './src/models/DiscountApplication';
+
+async function updateCommissionWithNewPurchases() {
+  try {
+    await mongoose.connect(process.env.MONGODB_URI || '');
+    
+    console.log('\n🚀 Updating Commission Records with New Purchases\n');
+    
+    // Get the organization
+    const org = await Organization.findOne({ 'contactPerson.email': 'prayashahi@gmail.com' });
+    
+    if (!org) {
+      console.log('❌ Organization not found');
+      await mongoose.disconnect();
+      return;
+    }
+    
+    console.log('📊 Organization:', org.name);
+    console.log('   Commission Rate:', org.commissionRate + '%');
+    
+    // Get the current month
+    const now = new Date();
+    const startDate = new Date(now.getFullYear(), now.getMonth(), 1);
+    const endDate = new Date(now.getFullYear(), now.getMonth() + 1, 0, 23, 59, 59, 999);
+    
+    console.log('\n📅 Period:', startDate.toISOString().split('T')[0], 'to', endDate.toISOString().split('T')[0]);
+    
+    // Get the existing commission record for this period
+    const existingCommission = await Commission.findOne({
+      organization: org._id,
+      'period.startDate': startDate,
+      'period.endDate': endDate,
+      'period.type': 'monthly',
+    });
+    
+    if (!existingCommission) {
+      console.log('⚠️  No existing commission found for this period');
+      await mongoose.disconnect();
+      return;
+    }
+    
+    console.log('\n📝 Found existing commission record:');
+    console.log('   Status:', existingCommission.status);
+    console.log('   Current Total Sales:', existingCommission.totalSales);
+    console.log('   Current Commission:', existingCommission.finalAmount);
+    
+    // Get members of the organization
+    const members = await OrganizationMember.find({
+      organization: org._id,
+      status: { $in: ['active', 'registered'] },
+      totalSpent: { $gt: 0 }
+    });
+    
+    console.log('\n👥 Active members with purchases:', members.length);
+    
+    let totalSales = 0;
+    const purchaseDetails: any[] = [];
+    
+    // For each member, find their actual purchases in this period
+    for (const member of members) {
+      const memberPurchases = await Purchase.find({
+        user: member.user,
+        status: 'captured',
+        createdAt: { $gte: startDate, $lte: endDate }
+      }).select('_id package amount user createdAt discountApplication');
+      
+      for (const purchase of memberPurchases) {
+        // Get the discount application to find final price
+        const discountApp = await DiscountApplication.findOne({
+          purchase: purchase._id
+        }).select('finalPrice');
+        
+        const finalPrice = discountApp?.finalPrice || purchase.amount;
+        
+        totalSales += finalPrice;
+        purchaseDetails.push({
+          purchase: purchase._id,
+          user: purchase.user,
+          studentName: member.name,
+          packageName: 'Package',
+          amount: finalPrice,
+          commission: finalPrice * (org.commissionRate / 100),
+          purchaseDate: purchase.createdAt,
+        });
+      }
+      
+      console.log('  -', member.name, '- Purchases:', memberPurchases.length);
+    }
+    
+    const newCommission = (totalSales * org.commissionRate) / 100;
+    
+    console.log('\n💰 Updated Calculation:');
+    console.log('   Total Sales:', totalSales);
+    console.log('   Commission Rate:', org.commissionRate + '%');
+    console.log('   Commission Amount:', newCommission.toFixed(2));
+    
+    // Update the existing commission record
+    existingCommission.totalSales = totalSales;
+    existingCommission.purchaseCount = purchaseDetails.length;
+    existingCommission.baseCommission = newCommission;
+    existingCommission.totalCommission = newCommission;
+    existingCommission.finalAmount = newCommission;
+    existingCommission.purchases = purchaseDetails;
+    existingCommission.calculatedAt = new Date();
+    
+    await existingCommission.save();
+    
+    console.log('\n✅ Commission record updated successfully!');
+    console.log('   ID:', existingCommission._id);
+    console.log('   Status:', existingCommission.status);
+    console.log('   New Total Sales:', totalSales);
+    console.log('   New Commission Amount:', newCommission.toFixed(2));
+    console.log('\n💡 View in admin portal: http://localhost:3000/discounts/commissions\n');
+    
+    await mongoose.disconnect();
+  } catch (err) {
+    console.error('❌ Error:', err);
+    process.exit(1);
+  }
+}
+
+updateCommissionWithNewPurchases();

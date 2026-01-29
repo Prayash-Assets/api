@@ -8,6 +8,7 @@ import { seedAdminUser } from "./adminUserSeed";
 import { seedQuestions } from "./questionSeed";
 import { seedPackages } from "./packageSeed";
 import { seedPurchases } from "./purchaseSeed";
+import { seedReferralSettings } from "./referralSettingsSeed";
 import dotenv from "dotenv";
 dotenv.config();
 
@@ -22,6 +23,7 @@ async function seedAll() {
     await seedLevels();
     await seedRoles();
     await seedAdminUser();
+    await seedReferralSettings();
     await seedQuestions();
     await seedPackages(); // Add package seeding before purchases
     await seedPurchases();

@@ -1,5 +1,6 @@
 import { FastifyRequest, FastifyReply } from "fastify";
 import User, { Student } from "../models/User";
+import { sanitizeObject } from "../utils/textSanitizer";
 import Package from "../models/Package";
 import Purchase from "../models/Purchase";
 import { Result } from "../models/Result";
@@ -131,6 +132,37 @@ export const getPurchasedPackages = async (
     reply.send(packagesWithDetails);
   } catch (error: any) {
     console.error("Get purchased packages error:", error.message);
+    reply.status(500).send({ error: "Internal Server Error" });
+  }
+};
+
+// Get pending orders for a student
+export const getPendingOrders = async (
+  request: TestRequest,
+  reply: FastifyReply
+) => {
+  try {
+    let userId = (request as any).user?.id;
+    if (!userId) {
+      const user = await User.findOne({ email: "daniel@inovitrix.com" });
+      userId = user?._id;
+    }
+
+    const purchases = await Purchase.find({
+      user: userId,
+      status: { $in: ["created", "failed"] }
+    })
+      .sort({ createdAt: -1 })
+      .select("_id package status razorpayOrderId amount currency");
+
+    const purchasesWithKey = purchases.map(p => ({
+      ...p.toObject(),
+      key: process.env.RAZORPAY_KEY_ID
+    }));
+
+    reply.send(purchasesWithKey);
+  } catch (error: any) {
+    console.error("Get pending orders error:", error.message);
     reply.status(500).send({ error: "Internal Server Error" });
   }
 };
@@ -632,23 +664,68 @@ export const getStudentResultDetail = async (
         duration: (result.mockTest as any).duration,
       },
       detailedAnalysis: result.detailedAnalysis,
-      questionWiseAnalysis: result.answers.map((answer: any) => ({
-        questionId: answer.question._id,
-        questionText: answer.question.text,
-        options: answer.question.options,
-        userAnswer: answer.answer || answer.selectedAnswer,
-        correctAnswer: answer.question.correctAnswer,
-        isCorrect: answer.isCorrect,
-        marks: answer.marks,
-        timeTaken: answer.timeTaken || 0,
-        difficulty: answer.question.difficulty,
-        subject: answer.question.subject_id?.name || "General",
-        category: answer.question.category_id?.name || "General",
-        explanation: answer.question.explanation || "",
-      })),
+      questionWiseAnalysis: result.answers.map((answer: any) => {
+        const questionOptions = answer.question.options || [];
+        const rawAnswer = answer.answer || answer.selectedAnswer;
+
+        // Convert user answer to actual option text
+        let userAnswerText = rawAnswer;
+        if (rawAnswer !== null && rawAnswer !== undefined && rawAnswer !== "") {
+          // If the answer is a number (option index), get the option text
+          if (typeof rawAnswer === "number" || !isNaN(Number(rawAnswer))) {
+            const optionIndex = Number(rawAnswer);
+            if (optionIndex >= 0 && optionIndex < questionOptions.length) {
+              userAnswerText = questionOptions[optionIndex].optionText;
+            }
+          } else if (typeof rawAnswer === "string") {
+            // Check if it's an option ID and map to text
+            const matchedOption = questionOptions.find(
+              (opt: any) => opt._id?.toString() === rawAnswer || opt.optionText === rawAnswer
+            );
+            if (matchedOption) {
+              userAnswerText = matchedOption.optionText;
+            }
+          } else if (Array.isArray(rawAnswer)) {
+            // Handle multiple answers
+            userAnswerText = rawAnswer.map((ans: any) => {
+              if (typeof ans === "number" || !isNaN(Number(ans))) {
+                const optionIndex = Number(ans);
+                if (optionIndex >= 0 && optionIndex < questionOptions.length) {
+                  return questionOptions[optionIndex].optionText;
+                }
+              }
+              const matchedOption = questionOptions.find(
+                (opt: any) => opt._id?.toString() === ans || opt.optionText === ans
+              );
+              return matchedOption ? matchedOption.optionText : ans;
+            });
+          }
+        }
+
+        // Get correct answer text from options
+        const correctAnswerTexts = questionOptions
+          .filter((opt: any) => opt.isCorrect)
+          .map((opt: any) => opt.optionText);
+
+        return {
+          questionId: answer.question._id,
+          questionText: answer.question.text,
+          options: answer.question.options,
+          userAnswer: userAnswerText || "Not answered",
+          correctAnswer: correctAnswerTexts.length === 1 ? correctAnswerTexts[0] : correctAnswerTexts,
+          isCorrect: answer.isCorrect,
+          marks: answer.marks,
+          timeTaken: answer.timeTaken || 0,
+          difficulty: answer.question.difficulty,
+          subject: answer.question.subject_id?.name || "General",
+          category: answer.question.category_id?.name || "General",
+          explanation: answer.question.explanation || "",
+        };
+      }),
     };
 
-    reply.send(detailedResult);
+    // Sanitize text to fix encoding issues with special characters
+    reply.send(sanitizeObject(detailedResult));
   } catch (error) {
     console.error("Error fetching detailed result for student:", error);
     reply.status(500).send({ message: "Error fetching result details", error });
