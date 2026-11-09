@@ -90,16 +90,31 @@ export const createResult = async (
 };
 
 // Get all results
+const isAdminFromRequest = (request: FastifyRequest): boolean => {
+  const user = (request as any).user;
+  if (!user) return false;
+  if (user.userType?.toLowerCase() === "admin") return true;
+  return (user.roles || []).some(
+    (r: string) => String(r).toLowerCase() === "admin"
+  );
+};
+
 export const getAllResults = async (
   request: FastifyRequest,
   reply: FastifyReply
 ) => {
   try {
-    logger.info("Attempting to fetch all results");
-    const results = await Result.find()
+    const authUser = (request as any).user;
+    const filter = isAdminFromRequest(request)
+      ? {}
+      : { student: authUser?.id };
+
+    logger.info("Attempting to fetch results", { filter });
+    const results = await Result.find(filter)
       .populate("student", "fullname email")
-      .populate("mockTest", "title");
-    logger.info("Successfully fetched all results");
+      .populate("mockTest", "title")
+      .select("-answers -detailedAnalysis");
+    logger.info("Successfully fetched results");
     reply.send(results);
   } catch (error) {
     logger.error("Error fetching results", { error });
@@ -114,12 +129,22 @@ export const getResultsByStudent = async (
 ) => {
   try {
     const studentId = request.params.studentId;
+    const authUser = (request as any).user;
+
+    if (
+      !isAdminFromRequest(request) &&
+      String(authUser?.id) !== String(studentId)
+    ) {
+      return reply.status(403).send({ message: "Insufficient permissions" });
+    }
+
     logger.info(
       `Attempting to fetch results for student with ID: ${studentId}`
     );
     const results = await Result.find({ student: studentId })
       .populate("student", "fullname email")
-      .populate("mockTest", "title");
+      .populate("mockTest", "title")
+      .select("-answers -detailedAnalysis");
     logger.info("Successfully fetched results for student", { studentId });
     reply.send(results);
   } catch (error) {
@@ -168,6 +193,7 @@ export const getResultById = async (
 ) => {
   try {
     const resultId = request.params.id;
+    const authUser = (request as any).user;
     logger.info(`Attempting to fetch result with ID: ${resultId}`);
     const result = await Result.findById(resultId)
       .populate("student", "fullname email")
@@ -178,6 +204,19 @@ export const getResultById = async (
       logger.warn("Result not found", { id: resultId });
       return reply.status(404).send({ message: "Result not found" });
     }
+
+    const studentId =
+      (result.student as any)?._id?.toString?.() ||
+      (result.student as any)?.id?.toString?.() ||
+      String(result.student);
+
+    if (
+      !isAdminFromRequest(request) &&
+      String(authUser?.id) !== String(studentId)
+    ) {
+      return reply.status(403).send({ message: "Insufficient permissions" });
+    }
+
     logger.info("Successfully fetched result", { id: resultId });
     reply.send(result);
   } catch (error) {

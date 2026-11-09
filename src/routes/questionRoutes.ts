@@ -32,15 +32,15 @@ export const questionRoutes = async (fastify: FastifyInstance) => {
     deleteQuestion as any
   );
 
-  // Read operations - accessible to authenticated users (students and admins)
+  // Question bank reads are admin-only (students receive questions via mock-test APIs)
   fastify.get(
     "/",
-    { preHandler: [checkRoles(["student", "admin"])] },
+    { preHandler: [checkRoles(["admin"])] },
     getAllQuestions as any
   );
   fastify.get(
     "/:id",
-    { preHandler: [checkRoles(["student", "admin"])] },
+    { preHandler: [checkRoles(["admin"])] },
     getQuestionById as any
   );
 

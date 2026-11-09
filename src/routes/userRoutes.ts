@@ -45,12 +45,12 @@ async function userRoutes(
   );
   fastify.get(
     "/users",
-    { preHandler: [checkRoles(["student", "admin"])] },
+    { preHandler: [checkRoles(["admin"])] },
     userController.getAllUsers
   );
   fastify.get<{ Params: userController.IUserParams }>(
     "/users/:id",
-    { preHandler: [checkRoles(["student", "admin"])] },
+    { preHandler: [checkRoles(["student", "admin", "orgadmin"])] },
     userController.getUserById
   );
   fastify.put<{ Params: userController.IUserParams; Body: Partial<IUser> }>(
@@ -68,7 +68,7 @@ async function userRoutes(
     Body: { password: string };
   }>(
     "/users/:id/password",
-    { preHandler: [checkRoles(["admin", "student"])] },
+    { preHandler: [checkRoles(["admin", "student", "orgadmin"])] },
     userController.updateUserPassword
   );
 

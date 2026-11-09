@@ -7,16 +7,20 @@ import User, { IUser, Student, Admin, IStudent, IAdmin, IOrgAdmin } from "../mod
 import Role from "../models/Role";
 import logger from "../config/logger";
 import emailService from "../utils/emailService";
+import { getJwtSecret } from "../utils/jwtSecret";
 
 // Validation schemas
 const registerSchema = Joi.object({
   fullname: Joi.string().min(3).max(30).required(),
   email: Joi.string().email().required(),
   password: Joi.string().min(6).required(),
-  phone: Joi.number().required().messages({
-    'number.base': 'Phone number must be a valid number',
-    'any.required': 'Phone number is required'
-  }),
+  phone: Joi.alternatives()
+    .try(Joi.number(), Joi.string().pattern(/^[0-9+\-\s()]{7,20}$/))
+    .required()
+    .messages({
+      "any.required": "Phone number is required",
+      "alternatives.match": "Phone number must be valid",
+    }),
   userType: Joi.string()
     .valid("student", "admin", "Student", "Admin")
     .required(),
@@ -72,7 +76,7 @@ const resendVerificationSchema = Joi.object({
 
 // Helper function to generate JWT token
 const generateToken = (user: IUser, expiresIn: string = "3h"): string => {
-  const secret = process.env.JWT_SECRET || "your-secret-key";
+  const secret = getJwtSecret();
   const payload = {
     id: user.id,
     fullname: user.fullname,
@@ -149,6 +153,11 @@ export async function register(request: FastifyRequest, reply: FastifyReply) {
     const userType =
       rawUserType.toLowerCase() === "student" ? "Student" : "Admin";
 
+    const normalizedPhone =
+      typeof phone === "string"
+        ? Number(String(phone).replace(/\D/g, ""))
+        : phone;
+
     // Check if user already exists
     const existingUser = await User.findOne({ email });
     if (existingUser) {
@@ -157,8 +166,8 @@ export async function register(request: FastifyRequest, reply: FastifyReply) {
     }
 
     // Check if phone number already exists (if provided)
-    if (phone) {
-      const existingPhoneUser = await User.findOne({ phone });
+    if (normalizedPhone) {
+      const existingPhoneUser = await User.findOne({ phone: normalizedPhone });
       if (existingPhoneUser) {
         return reply.status(400).send({ error: "Phone number already exists" });
       }
@@ -179,7 +188,7 @@ export async function register(request: FastifyRequest, reply: FastifyReply) {
         fullname,
         email,
         password: hashedPassword,
-        phone,
+        phone: normalizedPhone,
         city,
         state,
         education,
@@ -196,7 +205,7 @@ export async function register(request: FastifyRequest, reply: FastifyReply) {
         fullname,
         email,
         password: hashedPassword,
-        phone,
+        phone: normalizedPhone,
         address,
         userType: "Admin",
         verificationCode,
@@ -582,7 +591,7 @@ export async function refreshToken(
     try {
       decoded = jwt.verify(
         refreshToken,
-        process.env.JWT_SECRET || "your-secret-key"
+        getJwtSecret()
       );
     } catch (jwtError) {
       return reply.status(401).send({ error: "Invalid refresh token" });
@@ -593,13 +602,15 @@ export async function refreshToken(
       return reply.status(404).send({ error: "User not found" });
     }
 
-    // Generate new access token
+    // Rotate both access and refresh tokens (invalidate reuse of the old refresh JWT by expiry window)
     const newAccessToken = generateToken(user, "3h");
+    const newRefreshToken = generateToken(user, "7d");
 
     logger.info("Token refreshed", { userId: user.id });
     reply.send({
       message: "Token refreshed successfully",
       accessToken: newAccessToken,
+      refreshToken: newRefreshToken,
     });
   } catch (err: any) {
     logger.error("Refresh token error", {
@@ -731,7 +742,7 @@ export async function verifyToken(
     }
 
     const token = authHeader.substring(7);
-    const decoded = jwt.verify(token, process.env.JWT_SECRET || "your-secret-key") as any;
+    const decoded = jwt.verify(token, getJwtSecret()) as any;
 
     const user = await User.findById(decoded.id).populate("roles").select("-password");
     if (!user) {

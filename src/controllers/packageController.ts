@@ -113,18 +113,56 @@ export const getAllPackages = async (
 ) => {
   try {
     logger.info("Attempting to fetch all packages");
+    const query = (req.query || {}) as {
+      page?: string;
+      limit?: string;
+      search?: string;
+    };
+    const page = Math.max(parseInt(query.page || "1", 10) || 1, 1);
+    const limit = Math.min(
+      Math.max(parseInt(query.limit || "24", 10) || 24, 1),
+      100
+    );
+    const skip = (page - 1) * limit;
 
-    const packages = await Package.find()
-      .populate({
-        path: "mockTests",
-        select: "title description duration totalMarks status testType",
-      })
-      .sort({ createdAt: -1 });
+    const filter: Record<string, unknown> = {};
+    if (query.search?.trim()) {
+      const search = query.search.trim();
+      filter.$or = [
+        { name: { $regex: search, $options: "i" } },
+        { description: { $regex: search, $options: "i" } },
+      ];
+    }
 
-    logger.info("Successfully fetched all packages", {
+    const [packages, totalItems] = await Promise.all([
+      Package.find(filter)
+        .populate({
+          path: "mockTests",
+          select: "title description duration totalMarks status testType",
+        })
+        .sort({ createdAt: -1 })
+        .skip(skip)
+        .limit(limit),
+      Package.countDocuments(filter),
+    ]);
+
+    const totalPages = Math.max(Math.ceil(totalItems / limit), 1);
+    logger.info("Successfully fetched packages", {
       count: packages.length,
+      page,
+      totalItems,
     });
-    res.status(200).send(packages);
+    res.status(200).send({
+      packages,
+      pagination: {
+        currentPage: page,
+        totalPages,
+        totalItems,
+        itemsPerPage: limit,
+        hasNextPage: page < totalPages,
+        hasPrevPage: page > 1,
+      },
+    });
   } catch (error: any) {
     logger.error("Error fetching packages", { error });
     res.status(500).send({

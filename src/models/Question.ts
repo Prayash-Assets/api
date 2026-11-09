@@ -51,4 +51,8 @@ const QuestionSchema = new Schema<IQuestion>(
   { timestamps: true }
 );
 
+QuestionSchema.index({ category_id: 1, subject_id: 1, level_id: 1 });
+QuestionSchema.index({ text: "text" });
+QuestionSchema.index({ difficulty: 1 });
+
 export const Question = model<IQuestion>("Question", QuestionSchema);

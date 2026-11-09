@@ -41,20 +41,19 @@ export const getAllCategories = async (
   reply: FastifyReply
 ) => {
   try {
-    const categories = await Category.find();
-
-    // Get question counts for each category
-    const categoriesWithCounts = await Promise.all(
-      categories.map(async (category) => {
-        const questionCount = await Question.countDocuments({
-          category_id: category._id,
-        });
-        return {
-          ...category.toObject(),
-          questionCount,
-        };
-      })
+    const [categories, countRows] = await Promise.all([
+      Category.find().lean(),
+      Question.aggregate([
+        { $group: { _id: "$category_id", count: { $sum: 1 } } },
+      ]),
+    ]);
+    const countMap = new Map(
+      countRows.map((row: any) => [String(row._id), row.count as number])
     );
+    const categoriesWithCounts = categories.map((category: any) => ({
+      ...category,
+      questionCount: countMap.get(String(category._id)) || 0,
+    }));
 
     reply.send(categoriesWithCounts);
   } catch (error) {

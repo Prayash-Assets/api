@@ -41,20 +41,19 @@ export const getAllSubjects = async (
   reply: FastifyReply
 ) => {
   try {
-    const subjects = await Subject.find();
-
-    // Get question counts for each subject
-    const subjectsWithCounts = await Promise.all(
-      subjects.map(async (subject) => {
-        const questionCount = await Question.countDocuments({
-          subject_id: subject._id,
-        });
-        return {
-          ...subject.toObject(),
-          questionCount,
-        };
-      })
+    const [subjects, countRows] = await Promise.all([
+      Subject.find().lean(),
+      Question.aggregate([
+        { $group: { _id: "$subject_id", count: { $sum: 1 } } },
+      ]),
+    ]);
+    const countMap = new Map(
+      countRows.map((row: any) => [String(row._id), row.count as number])
     );
+    const subjectsWithCounts = subjects.map((subject: any) => ({
+      ...subject,
+      questionCount: countMap.get(String(subject._id)) || 0,
+    }));
 
     reply.send(subjectsWithCounts);
   } catch (error) {

@@ -116,7 +116,9 @@ export const createMockTest = async (
 };
 
 export const getAllMockTests = async (
-  request: FastifyRequest<{ Querystring: { page?: string; limit?: string } }>,
+  request: FastifyRequest<{
+    Querystring: { page?: string; limit?: string; search?: string };
+  }>,
   reply: FastifyReply
 ) => {
   try {
@@ -125,20 +127,32 @@ export const getAllMockTests = async (
     // Parse query parameters with defaults
     const page = parseInt(request.query.page || "1", 10);
     const limit = parseInt(request.query.limit || "10", 10);
+    const search = (request.query.search || "").trim();
 
     // Ensure positive values
     const pageNum = Math.max(1, page);
     const limitNum = Math.max(1, Math.min(100, limit)); // Cap at 100 for safety
 
+    const filter: Record<string, unknown> = {};
+    if (search) {
+      filter.$or = [
+        { title: { $regex: search, $options: "i" } },
+        { description: { $regex: search, $options: "i" } },
+      ];
+    }
+
     // Get total count
-    const total = await MockTest.countDocuments();
+    const total = await MockTest.countDocuments(filter);
 
     // Calculate pagination values
-    const totalPages = Math.ceil(total / limitNum);
+    const totalPages = Math.ceil(total / limitNum) || 1;
     const skip = (pageNum - 1) * limitNum;
 
     // Fetch mock tests without population to avoid large payloads
-    const mockTests = await MockTest.find().skip(skip).limit(limitNum);
+    const mockTests = await MockTest.find(filter)
+      .sort({ createdAt: -1 })
+      .skip(skip)
+      .limit(limitNum);
 
     logger.info("Successfully fetched paginated mock tests", {
       page: pageNum,

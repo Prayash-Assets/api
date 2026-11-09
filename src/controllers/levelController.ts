@@ -43,20 +43,19 @@ export const getAllLevels = async (
   reply: FastifyReply
 ) => {
   try {
-    const levels = await Level.find();
-
-    // Get question counts for each level
-    const levelsWithCounts = await Promise.all(
-      levels.map(async (level) => {
-        const questionCount = await Question.countDocuments({
-          level_id: level._id,
-        });
-        return {
-          ...level.toObject(),
-          questionCount,
-        };
-      })
+    const [levels, countRows] = await Promise.all([
+      Level.find().lean(),
+      Question.aggregate([
+        { $group: { _id: "$level_id", count: { $sum: 1 } } },
+      ]),
+    ]);
+    const countMap = new Map(
+      countRows.map((row: any) => [String(row._id), row.count as number])
     );
+    const levelsWithCounts = levels.map((level: any) => ({
+      ...level,
+      questionCount: countMap.get(String(level._id)) || 0,
+    }));
 
     reply.status(200).send(levelsWithCounts);
   } catch (error) {

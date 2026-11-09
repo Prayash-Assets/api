@@ -29,6 +29,8 @@ import { commissionRoutes } from "./routes/commissionRoutes";
 import { validateSession } from "./middleware/sessionMiddleware";
 
 import cors from "@fastify/cors";
+import helmet from "@fastify/helmet";
+import rateLimit from "@fastify/rate-limit";
 
 // Load environment variables
 dotenv.config();
@@ -36,9 +38,26 @@ dotenv.config();
 export const createApp = async (): Promise<FastifyInstance> => {
   const app: FastifyInstance = Fastify({
     logger: process.env.NODE_ENV !== "production",
+    trustProxy: true,
   });
 
+  await app.register(helmet, {
+    contentSecurityPolicy: false, // API-only; tighten if serving HTML
+    crossOriginResourcePolicy: { policy: "cross-origin" },
+  });
 
+  // Global baseline rate limit (auth routes add stricter limits)
+  await app.register(rateLimit, {
+    global: true,
+    max: 300,
+    timeWindow: "1 minute",
+    ban: 0,
+    errorResponseBuilder: () => ({
+      statusCode: 429,
+      error: "Too Many Requests",
+      message: "Rate limit exceeded. Please try again shortly.",
+    }),
+  });
 
   // Register multipart plugin for file uploads
   await app.register(require("@fastify/multipart"), {
@@ -48,31 +67,39 @@ export const createApp = async (): Promise<FastifyInstance> => {
     },
   });
 
-
   await app.register(cors, {
     origin: [
-      'https://main.d29juw0qooqw8k.amplifyapp.com',
-      'http://localhost:3000', // For local development
-      'http://localhost:3001', // For local development
-      'https://prayashassets.com', // Production frontend
-      'https://www.prayashassets.com' // Production frontend with www
+      "https://main.d29juw0qooqw8k.amplifyapp.com",
+      "http://localhost:3000",
+      "http://localhost:3001",
+      "https://prayashassets.com",
+      "https://www.prayashassets.com",
     ],
     methods: ["GET", "PUT", "POST", "DELETE", "OPTIONS"],
-    allowedHeaders: ["Content-Type", "Authorization", "Origin", "Accept", "X-Requested-With", "X-Session-ID"],
+    allowedHeaders: [
+      "Content-Type",
+      "Authorization",
+      "Origin",
+      "Accept",
+      "X-Requested-With",
+      "X-Session-ID",
+    ],
     credentials: true,
     preflightContinue: false,
-    optionsSuccessStatus: 200
+    optionsSuccessStatus: 200,
   });
 
   // Handle AWS API Gateway stage prefix
-  app.addHook("onRequest", async (request, reply) => {
+  app.addHook("onRequest", async (request) => {
     const originalUrl = request.url;
-    if (request.url.startsWith('/prod/')) {
+    if (request.url.startsWith("/prod/")) {
       request.raw.url = request.url.substring(5);
-    } else if (request.url === '/prod') {
-      request.raw.url = '/';
+    } else if (request.url === "/prod") {
+      request.raw.url = "/";
     }
-    console.log(`URL: ${originalUrl} -> ${request.raw.url}`);
+    if (process.env.NODE_ENV !== "production") {
+      console.log(`URL: ${originalUrl} -> ${request.raw.url}`);
+    }
   });
 
   // Connect to Database (ensure connection is established)

@@ -40,7 +40,8 @@ export async function validateSession(
     let decoded: any;
     
     try {
-      decoded = jwt.verify(token, process.env.JWT_SECRET || "your-secret-key");
+      const { getJwtSecret } = require("../utils/jwtSecret");
+      decoded = jwt.verify(token, getJwtSecret());
     } catch (jwtError) {
       return; // Let other auth middleware handle invalid token
     }

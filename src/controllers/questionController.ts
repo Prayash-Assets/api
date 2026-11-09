@@ -297,26 +297,69 @@ export const uploadQuestionsFromExcel = async (
     const errors: ProcessingError[] = [];
     const processedQuestions = [];
 
-    // Process each row
+    // Pre-validate rows, then resolve lookups in batch (avoid N+1)
+    type ValidatedRow = {
+      rowNumber: number;
+      value: {
+        text: string;
+        category_name: string;
+        subject_name: string;
+        level_name: string;
+        option1: string;
+        option2: string;
+        option3?: string;
+        option4?: string;
+        correct_option: number;
+        difficulty: string;
+        explanation?: string;
+      };
+    };
+    const validatedRows: ValidatedRow[] = [];
+    const categoryNames = new Set<string>();
+    const subjectNames = new Set<string>();
+    const levelNames = new Set<string>();
+    const questionTexts: string[] = [];
+
     for (let i = 0; i < jsonData.length; i++) {
       const row = jsonData[i] as any;
-      const rowNumber = i + 2; // Excel rows start from 2 (after header)
+      const rowNumber = i + 2;
+      const { error, value } = excelQuestionSchema.validate(row);
+      if (error) {
+        errors.push({
+          row: rowNumber,
+          message: error.details.map((d) => d.message).join(", "),
+        });
+        continue;
+      }
+      validatedRows.push({ rowNumber, value });
+      categoryNames.add(value.category_name);
+      subjectNames.add(value.subject_name);
+      levelNames.add(value.level_name);
+      questionTexts.push(value.text);
+    }
 
+    const [categories, subjects, levels, existingQuestions] = await Promise.all([
+      Category.find({ name: { $in: [...categoryNames] } }).lean(),
+      Subject.find({ name: { $in: [...subjectNames] } }).lean(),
+      Level.find({ name: { $in: [...levelNames] } }).lean(),
+      Question.find({ text: { $in: questionTexts } })
+        .select("text")
+        .lean(),
+    ]);
+
+    const categoryByName = new Map(
+      categories.map((c) => [c.name, c] as const)
+    );
+    const subjectByName = new Map(subjects.map((s) => [s.name, s] as const));
+    const levelByName = new Map(levels.map((l) => [l.name, l] as const));
+    const existingTextSet = new Set(existingQuestions.map((q) => q.text));
+    const seenInFile = new Set<string>();
+
+    for (const { rowNumber, value } of validatedRows) {
       try {
-        // Validate row data
-        const { error, value } = excelQuestionSchema.validate(row);
-        if (error) {
-          errors.push({
-            row: rowNumber,
-            message: error.details.map((d) => d.message).join(", "),
-          });
-          continue;
-        }
-
-        // Find related entities by name
-        const category = await Category.findOne({ name: value.category_name });
-        const subject = await Subject.findOne({ name: value.subject_name });
-        const level = await Level.findOne({ name: value.level_name });
+        const category = categoryByName.get(value.category_name);
+        const subject = subjectByName.get(value.subject_name);
+        const level = levelByName.get(value.level_name);
 
         if (!category) {
           errors.push({
@@ -342,17 +385,15 @@ export const uploadQuestionsFromExcel = async (
           continue;
         }
 
-        // Check for duplicate questions
-        const existingQuestion = await Question.findOne({ text: value.text });
-        if (existingQuestion) {
+        if (existingTextSet.has(value.text) || seenInFile.has(value.text)) {
           errors.push({
             row: rowNumber,
             message: `Question with text '${value.text}' already exists`,
           });
           continue;
         }
+        seenInFile.add(value.text);
 
-        // Build options array
         const options = [
           { optionText: value.option1, isCorrect: value.correct_option === 1 },
           { optionText: value.option2, isCorrect: value.correct_option === 2 },
@@ -372,7 +413,6 @@ export const uploadQuestionsFromExcel = async (
           });
         }
 
-        // Ensure at least one correct answer exists
         const hasCorrectAnswer = options.some((opt) => opt.isCorrect);
         if (!hasCorrectAnswer) {
           errors.push({
@@ -382,7 +422,7 @@ export const uploadQuestionsFromExcel = async (
           continue;
         }
 
-        const questionData = {
+        validQuestions.push({
           text: value.text,
           options,
           difficulty: value.difficulty,
@@ -390,9 +430,7 @@ export const uploadQuestionsFromExcel = async (
           subject_id: subject._id,
           level_id: level._id,
           explanation: value.explanation || "",
-        };
-
-        validQuestions.push(questionData);
+        });
         processedQuestions.push({
           row: rowNumber,
           text: value.text.substring(0, 50) + "...",
@@ -400,8 +438,9 @@ export const uploadQuestionsFromExcel = async (
       } catch (rowError) {
         errors.push({
           row: rowNumber,
-          message: `Processing error: ${rowError instanceof Error ? rowError.message : "Unknown error"
-            }`,
+          message: `Processing error: ${
+            rowError instanceof Error ? rowError.message : "Unknown error"
+          }`,
         });
       }
     }

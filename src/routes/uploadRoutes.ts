@@ -1,10 +1,10 @@
 import { FastifyInstance } from "fastify";
 import { generatePresignedUrl, confirmUpload } from "../controllers/uploadController";
-import { authenticate } from "../middleware/rbacMiddleware";
+import { checkRoles } from "../middleware/rbacMiddleware";
 
 async function uploadRoutes(fastify: FastifyInstance) {
-  // Apply authentication middleware to all routes
-  fastify.addHook("preHandler", authenticate);
+  // Uploads are admin-only
+  fastify.addHook("preHandler", checkRoles(["admin"]));
 
   // Generate presigned URL for direct S3 upload
   fastify.post(

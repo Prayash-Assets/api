@@ -1,59 +1,58 @@
-import { FastifyRequest, FastifyReply } from "fastify";
+import { FastifyReply } from "fastify";
 import { getSignedUrl } from "../utils/s3Service";
 import Package from "../models/Package";
 import Purchase from "../models/Purchase";
-
-interface FileRequest extends FastifyRequest {
-  user?: {
-    id: string;
-    email: string;
-    role: string;
-  };
-}
+import { AuthenticatedRequest } from "../middleware/rbacMiddleware";
 
 export const getFileAccess = async (
-  request: FileRequest,
+  request: AuthenticatedRequest,
   reply: FastifyReply
 ) => {
   try {
-    const { packageId, fileName } = request.params as { packageId: string; fileName: string };
-    
-    let userId = (request as any).user?.id;
+    const { packageId, fileName } = request.params as {
+      packageId: string;
+      fileName: string;
+    };
+
+    const userId = request.user?.id;
     if (!userId) {
-      const User = require("../models/User").default;
-      const user = await User.findOne({ email: "daniel@inovitrix.com" });
-      userId = user?._id;
+      return reply.status(401).send({ error: "Authentication required" });
     }
 
-    // Check if user has access to this package (either through purchase or direct access)
-    const purchase = await Purchase.findOne({
-      user: userId,
-      package: packageId,
-      status: "captured"
-    });
+    const isAdmin =
+      request.user?.userType?.toLowerCase() === "admin" ||
+      request.user?.roles?.some(
+        (r: string) => String(r).toLowerCase() === "admin"
+      );
 
-    // For now, allow access if package exists (you can add more access control later)
-    // if (!purchase) {
-    //   return reply.status(403).send({ error: "Access denied to this package" });
-    // }
+    if (!isAdmin) {
+      const purchase = await Purchase.findOne({
+        user: userId,
+        package: packageId,
+        status: "captured",
+      });
 
-    // Get package to find the file
+      if (!purchase) {
+        return reply
+          .status(403)
+          .send({ error: "Access denied to this package" });
+      }
+    }
+
     const pkg = await Package.findById(packageId);
     if (!pkg) {
       return reply.status(404).send({ error: "Package not found" });
     }
 
-    const file = pkg.files.find(f => f.name === fileName);
+    const file = pkg.files.find((f) => f.name === fileName);
     if (!file) {
       return reply.status(404).send({ error: "File not found" });
     }
 
-    // Extract S3 key from URL
-    const urlParts = file.url.split('/');
-    const key = urlParts.slice(-2).join('/'); // Get last two parts (folder/filename)
+    const urlParts = file.url.split("/");
+    const key = urlParts.slice(-2).join("/");
 
-    // Generate presigned URL
-    const signedUrl = await getSignedUrl(key, 3600); // 1 hour expiry
+    const signedUrl = await getSignedUrl(key, 3600);
 
     reply.send({ url: signedUrl });
   } catch (error: any) {

@@ -1,5 +1,5 @@
 import { FastifyInstance } from "fastify";
-import { authenticate } from "../middleware/rbacMiddleware";
+import { authenticate, checkRoles } from "../middleware/rbacMiddleware";
 import {
     createGroup,
     getMyGroups,
@@ -22,8 +22,12 @@ export const groupRoutes = async (fastify: FastifyInstance) => {
     // All routes require authentication
     fastify.addHook("preHandler", authenticate);
 
-    // Get all active groups (for admin/dropdowns)
-    fastify.get("/all/active", getAllActiveGroups);
+    // Get all active groups (admin only)
+    fastify.get(
+      "/all/active",
+      { preHandler: [checkRoles(["admin"])] },
+      getAllActiveGroups
+    );
 
     // Create new group
     fastify.post("/", createGroup);

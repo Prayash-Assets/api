@@ -21,21 +21,38 @@ export const getDashboardData = async (
   reply: FastifyReply
 ) => {
   try {
-    // Temporarily remove auth for testing
-    const userId = "68615116798897f13973b81c"; // Real user ID for testing
+    const userId = (request as any).user?.id;
+    if (!userId) {
+      return reply.status(401).send({ error: "Authentication required" });
+    }
 
-    // Mock performance data - replace with actual data from your system
-    const performanceData = {
-      totalTests: 0,
-      averageScore: 0,
-      completedTests: 0,
-      rank: 0,
-    };
+    const [purchases, results] = await Promise.all([
+      Purchase.find({ user: userId, status: "captured" })
+        .populate("package", "name")
+        .limit(20),
+      Result.find({ student: userId }).select("score percentage createdAt").limit(50),
+    ]);
+
+    const completedTests = results.length;
+    const averageScore =
+      completedTests > 0
+        ? Math.round(
+            results.reduce(
+              (sum, r: any) => sum + (r.percentage || r.score || 0),
+              0
+            ) / completedTests
+          )
+        : 0;
 
     reply.send({
-      packages: [],
-      performance: performanceData,
-      mockTests: [], // Will be populated from actual mock tests
+      packages: purchases.map((p: any) => p.package).filter(Boolean),
+      performance: {
+        totalTests: completedTests,
+        averageScore,
+        completedTests,
+        rank: 0,
+      },
+      mockTests: [],
     });
   } catch (error: any) {
     console.error("Get dashboard data error:", error.message);
@@ -50,11 +67,9 @@ export const getPurchasedPackages = async (
 ) => {
   try {
     // Find user by email if no authenticated user
-    let userId = (request as any).user?.id;
-
+        const userId = (request as any).user?.id;
     if (!userId) {
-      const user = await User.findOne({ email: "daniel@inovitrix.com" });
-      userId = user?._id;
+      return reply.status(401).send({ error: "Authentication required" });
     }
 
     console.log("DEBUG: Fetching purchased packages for user:", userId);
@@ -142,10 +157,9 @@ export const getPendingOrders = async (
   reply: FastifyReply
 ) => {
   try {
-    let userId = (request as any).user?.id;
+        const userId = (request as any).user?.id;
     if (!userId) {
-      const user = await User.findOne({ email: "daniel@inovitrix.com" });
-      userId = user?._id;
+      return reply.status(401).send({ error: "Authentication required" });
     }
 
     const purchases = await Purchase.find({
@@ -199,10 +213,9 @@ export const getAvailableMockTests = async (
   reply: FastifyReply
 ) => {
   try {
-    let userId = (request as any).user?.id;
+        const userId = (request as any).user?.id;
     if (!userId) {
-      const user = await User.findOne({ email: "daniel@inovitrix.com" });
-      userId = user?._id;
+      return reply.status(401).send({ error: "Authentication required" });
     }
 
     console.log("🔍 Fetching available mock tests for user:", userId);
@@ -294,10 +307,18 @@ export const getMockTest = async (
     const mockTestObj = mockTest.toObject();
     if (mockTestObj.questions) {
       mockTestObj.questions = mockTestObj.questions.map((question: any) => ({
-        ...question,
+        _id: question._id,
+        text: question.text,
+        difficulty: question.difficulty,
+        marks: question.marks,
+        negativeMarks: question.negativeMarks,
         category: question.category_id,
         subject: question.subject_id,
         level: question.level_id,
+        options: (question.options || []).map((opt: any) => ({
+          _id: opt._id,
+          optionText: opt.optionText,
+        })),
       }));
     }
 
@@ -318,10 +339,9 @@ export const submitMockTest = async (request: TestRequest, reply: FastifyReply) 
     console.log("📝 Test ID:", testId);
     console.log("📝 Answers received:", answers?.length || 0);
 
-    let userId = (request as any).user?.id;
+        const userId = (request as any).user?.id;
     if (!userId) {
-      const user = await User.findOne({ email: "daniel@inovitrix.com" });
-      userId = user?._id;
+      return reply.status(401).send({ error: "Authentication required" });
     }
 
     console.log("👤 User ID:", userId);
@@ -465,10 +485,9 @@ export const getStudentResults = async (request: TestRequest, reply: FastifyRepl
   try {
     const { packageId } = request.query as { packageId?: string };
 
-    let userId = (request as any).user?.id;
+        const userId = (request as any).user?.id;
     if (!userId) {
-      const user = await User.findOne({ email: "daniel@inovitrix.com" });
-      userId = user?._id;
+      return reply.status(401).send({ error: "Authentication required" });
     }
 
     const query: any = { student: userId };
@@ -492,10 +511,9 @@ export const getDetailedTestResult = async (request: TestRequest, reply: Fastify
     const { id: testId } = request.params as { id: string };
     const { packageId } = request.query as { packageId?: string };
 
-    let userId = (request as any).user?.id;
+        const userId = (request as any).user?.id;
     if (!userId) {
-      const user = await User.findOne({ email: "daniel@inovitrix.com" });
-      userId = user?._id;
+      return reply.status(401).send({ error: "Authentication required" });
     }
 
     const query: any = { student: userId, mockTest: testId };
@@ -524,10 +542,9 @@ export const checkTestAttemptEligibility = async (request: TestRequest, reply: F
     const { id: testId } = request.params as { id: string };
     const { packageId } = request.query as { packageId?: string };
 
-    let userId = (request as any).user?.id;
+        const userId = (request as any).user?.id;
     if (!userId) {
-      const user = await User.findOne({ email: "daniel@inovitrix.com" });
-      userId = user?._id;
+      return reply.status(401).send({ error: "Authentication required" });
     }
 
     // Get mock test details
@@ -599,10 +616,9 @@ export const getStudentResultDetail = async (
   try {
     const { id: resultId } = request.params as { id: string };
 
-    let userId = (request as any).user?.id;
+        const userId = (request as any).user?.id;
     if (!userId) {
-      const user = await User.findOne({ email: "daniel@inovitrix.com" });
-      userId = user?._id;
+      return reply.status(401).send({ error: "Authentication required" });
     }
 
     // Find result and ensure it belongs to the student

@@ -59,6 +59,15 @@ jspm_packages/
 
 # dotenv environment variables file
 .env
+.env.*
+!.env.example
+
+# Credentials / key material (never commit)
+keys/
+**/credentials*.csv
+**/*_credentials.csv
+*.pem
+*.p12
 
 # parcel-bundler cache (https://parceljs.org/)
 .cache

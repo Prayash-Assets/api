@@ -9,11 +9,11 @@ import {
   serveFile,
   getFileUrl,
 } from "../controllers/mediaController";
-import { authenticate } from "../middleware/rbacMiddleware";
+import { checkRoles } from "../middleware/rbacMiddleware";
 
 async function mediaRoutes(fastify: FastifyInstance) {
-  // Apply authentication middleware to all routes
-  fastify.addHook("preHandler", authenticate);
+  // Media library is admin-managed
+  fastify.addHook("preHandler", checkRoles(["admin"]));
 
   // Serve static files (authentication required)
   fastify.get(

@@ -17,36 +17,45 @@ import {
 import { checkRoles } from "../middleware/rbacMiddleware";
 
 export default async function authRoutes(fastify: FastifyInstance) {
-  // Public routes (no authentication required)
-  fastify.post("/login", login);
-  fastify.post("/register", register);
+  const authRateLimit = {
+    config: {
+      rateLimit: {
+        max: 10,
+        timeWindow: "1 minute",
+      },
+    },
+  };
+
+  // Public routes (stricter rate limits on credential endpoints)
+  fastify.post("/login", authRateLimit, login);
+  fastify.post("/register", authRateLimit, register);
   fastify.post("/logout", logout);
-  fastify.post("/refresh-token", refreshToken);
-  fastify.post("/request-password-reset", requestPasswordReset);
-  fastify.post("/reset-password", resetPassword);
-  fastify.post("/verify-email", verifyEmail);
-  fastify.post("/resend-verification", resendVerification);
+  fastify.post("/refresh-token", authRateLimit, refreshToken);
+  fastify.post("/request-password-reset", authRateLimit, requestPasswordReset);
+  fastify.post("/reset-password", authRateLimit, resetPassword);
+  fastify.post("/verify-email", authRateLimit, verifyEmail);
+  fastify.post("/resend-verification", authRateLimit, resendVerification);
 
   // Protected routes (authentication required)
   fastify.get(
     "/profile",
-    { preHandler: [checkRoles(["student", "admin"])] },
+    { preHandler: [checkRoles(["student", "admin", "orgadmin"])] },
     getProfile
   );
   fastify.put(
     "/profile",
-    { preHandler: [checkRoles(["student", "admin"])] },
+    { preHandler: [checkRoles(["student", "admin", "orgadmin"])] },
     updateProfile
   );
   fastify.post(
     "/change-password",
-    { preHandler: [checkRoles(["student", "admin"])] },
+    { preHandler: [checkRoles(["student", "admin", "orgadmin"])] },
     changePassword
   );
   fastify.get("/verify-token", verifyToken);
   fastify.get(
     "/validate-session",
-    { preHandler: [checkRoles(["student", "admin"])] },
+    { preHandler: [checkRoles(["student", "admin", "orgadmin"])] },
     validateSession
   );
 }

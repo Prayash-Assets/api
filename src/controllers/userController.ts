@@ -184,26 +184,49 @@ import OrganizationMember from "../models/OrganizationMember";
  */
 export const getAllUsers = async (req: FastifyRequest, reply: FastifyReply) => {
   try {
-    const users = await User.find()
-      .populate("roles")
-      .populate("organization")
-      .populate("studyGroup")
-      .lean();
+    const query = (req.query || {}) as {
+      page?: string;
+      limit?: string;
+      search?: string;
+    };
+    const page = Math.max(parseInt(query.page || "1", 10) || 1, 1);
+    const limit = Math.min(
+      Math.max(parseInt(query.limit || "50", 10) || 50, 1),
+      100
+    );
+    const skip = (page - 1) * limit;
 
-    // Get all user IDs
+    const filter: Record<string, unknown> = {};
+    if (query.search?.trim()) {
+      const search = query.search.trim();
+      filter.$or = [
+        { fullname: { $regex: search, $options: "i" } },
+        { email: { $regex: search, $options: "i" } },
+      ];
+    }
+
+    const [users, totalItems] = await Promise.all([
+      User.find(filter)
+        .select("-password")
+        .populate("roles")
+        .populate("organization")
+        .populate("studyGroup")
+        .sort({ createdAt: -1 })
+        .skip(skip)
+        .limit(limit)
+        .lean(),
+      User.countDocuments(filter),
+    ]);
+
     const userIds = users.map((u: any) => u._id);
 
-    // Find organization membership records for these users
-    // We want to know their status in their current or past organization
     const memberRecords = await OrganizationMember.find({
-      user: { $in: userIds }
+      user: { $in: userIds },
     })
       .populate("organization", "name")
-      .sort({ updatedAt: -1 }) // Get latest first if multiple?
+      .sort({ updatedAt: -1 })
       .lean();
 
-    // Map userId -> member record
-    // We want the most relevant active record, and the most relevant (recent) removed record.
     const statusMap = new Map();
     const removedMap = new Map();
 
@@ -211,12 +234,11 @@ export const getAllUsers = async (req: FastifyRequest, reply: FastifyReply) => {
       if (!member.user) return;
       const userId = member.user.toString();
 
-      if (member.status === 'removed') {
+      if (member.status === "removed") {
         if (!removedMap.has(userId)) {
           removedMap.set(userId, member);
         }
-      } else if (['invited', 'registered', 'active'].includes(member.status)) {
-        // Active/Registered/Invited
+      } else if (["invited", "registered", "active"].includes(member.status)) {
         if (!statusMap.has(userId)) {
           statusMap.set(userId, member);
         }
@@ -228,33 +250,45 @@ export const getAllUsers = async (req: FastifyRequest, reply: FastifyReply) => {
       const activeMember = statusMap.get(userId);
       const removedMember = removedMap.get(userId);
 
-      // Priority 1: User has an active/registered/invited org record
       if (activeMember && activeMember.organization) {
         return {
           ...user,
           orgStatus: activeMember.status,
           organization: activeMember.organization,
-          userType: (user.userType as "Student" | "Admin" | "OrgAdmin") || "Student",
+          userType:
+            (user.userType as "Student" | "Admin" | "OrgAdmin") || "Student",
         };
       }
 
-      // Priority 2: User has no active record, but has a removed record
       if (removedMember && removedMember.organization) {
         return {
           ...user,
-          orgStatus: 'removed',
+          orgStatus: "removed",
           removedFromOrg: removedMember.organization,
-          userType: (user.userType as "Student" | "Admin" | "OrgAdmin") || "Student",
+          userType:
+            (user.userType as "Student" | "Admin" | "OrgAdmin") || "Student",
         };
       }
 
       return {
         ...user,
-        userType: (user.userType as "Student" | "Admin" | "OrgAdmin") || "Student",
+        userType:
+          (user.userType as "Student" | "Admin" | "OrgAdmin") || "Student",
       };
     });
 
-    reply.send(usersWithStatus);
+    const totalPages = Math.max(Math.ceil(totalItems / limit), 1);
+    reply.send({
+      users: usersWithStatus,
+      pagination: {
+        currentPage: page,
+        totalPages,
+        totalItems,
+        itemsPerPage: limit,
+        hasNextPage: page < totalPages,
+        hasPrevPage: page > 1,
+      },
+    });
   } catch (error: any) {
     reply.code(500).send({ error: error.message });
   }
@@ -271,7 +305,20 @@ export const getUserById = async (
   reply: FastifyReply
 ) => {
   try {
-    const user = await User.findById(req.params.id).populate("roles");
+    const authUser = (req as any).user;
+    const isAdmin =
+      authUser?.userType?.toLowerCase() === "admin" ||
+      (authUser?.roles || []).some(
+        (r: string) => String(r).toLowerCase() === "admin"
+      );
+
+    if (!isAdmin && String(authUser?.id) !== String(req.params.id)) {
+      return reply.code(403).send({ error: "Insufficient permissions" });
+    }
+
+    const user = await User.findById(req.params.id)
+      .populate("roles")
+      .select("-password");
     if (!user) {
       return reply.code(404).send({ error: "User not found" });
     }
@@ -371,9 +418,25 @@ export const updateUserPassword = async (
 ) => {
   try {
     const { password } = req.body;
+    const authUser = (req as any).user;
+    const isAdmin =
+      authUser?.userType?.toLowerCase() === "admin" ||
+      (authUser?.roles || []).some(
+        (r: string) => String(r).toLowerCase() === "admin"
+      );
+
+    if (!isAdmin && String(authUser?.id) !== String(req.params.id)) {
+      return reply.code(403).send({ error: "Insufficient permissions" });
+    }
 
     if (!password || password.trim().length === 0) {
       return reply.code(400).send({ error: "Password is required" });
+    }
+
+    if (password.trim().length < 8) {
+      return reply
+        .code(400)
+        .send({ error: "Password must be at least 8 characters" });
     }
 
     const user = await User.findById(req.params.id);
@@ -381,8 +444,8 @@ export const updateUserPassword = async (
       return reply.code(404).send({ error: "User not found" });
     }
 
-    const salt = await bcrypt.genSalt(10); // Generate a salt
-    user.password = await bcrypt.hash(password, salt); // Hash the password
+    const salt = await bcrypt.genSalt(10);
+    user.password = await bcrypt.hash(password, salt);
     await user.save();
 
     reply.send({ message: "Password updated successfully" });
